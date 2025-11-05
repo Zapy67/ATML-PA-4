@@ -54,5 +54,16 @@ class SmallCNN(nn.Module):
 
 ## To-Do Model Training Functions/Class
 
-class SCNNTrainer:
+def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: nn.CrossEntropyLoss, optimizer: optim.Optimizer, device):
     pass
+
+
+def evaluate_model_on_test(model: SmallCNN, test_loader: DataLoader, criterion: nn.CrossEntropyLoss, device):
+    pass
+
+
+
+
+
+
+
