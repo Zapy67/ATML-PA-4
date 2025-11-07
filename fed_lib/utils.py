@@ -1,3 +1,59 @@
+"""
+utils.py
+====================
+This module provides utility components for Federated Learning (FL) simulations,
+including model definitions, training/evaluation routines, and dataset partitioning
+for both homogeneous and (future) heterogeneous domain splits.
+
+Main Components:
+----------------
+1. **Model Definitions**
+   - `SmallConvBlock`: a lightweight convolutional block (Conv2D → ReLU).
+   - `SmallCNN`: a compact convolutional neural network for CIFAR-10, designed
+     for fast training and deployment in FL or edge device scenarios.
+
+2. **Training and Evaluation**
+   - `train_model_one_epoch()`: trains a model for a single epoch with progress tracking.
+   - `model_one_epoch_losses()`: computes training loss progression across batches.
+   - `evaluate_model_on_test()`: evaluates a model on the test dataset and reports accuracy/loss.
+
+3. **Dataset Utilities**
+   - `get_cifar10()`: prepares CIFAR-10 train/test DataLoaders with standard normalization and augmentation.
+   - `get_homogenous_domains()`: partitions the training set into stratified client datasets
+     that maintain approximately equal class distributions (homogeneous domains).
+   - `_make_stratified_subsets()`: internal helper for creating balanced per-client splits.
+
+4. **Future Extensions**
+   - `_make_heterogenous_subsets()` and `get_heterogenous_domains()` placeholders for
+     generating non-IID (heterogeneous) client datasets, e.g., via Dirichlet sampling.
+
+Intended Use:
+-------------
+This file acts as the shared utility module for the FL framework (used by `fed_model.py`
+and `fed_methods.py`).
+
+Example:
+--------
+    from utils import SmallCNN, get_cifar10, get_homogenous_domains, train_model_one_epoch
+
+    # Prepare data and model
+    train_loader, test_loader = get_cifar10(batch_size=64)
+    model = SmallCNN()
+    
+    # Train one epoch
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    criterion = nn.CrossEntropyLoss()
+    loss, acc = train_model_one_epoch(model, train_loader, criterion, optimizer, "cuda")
+
+    # Create client splits
+    client_loaders = get_homogenous_domains(train_loader, clients=5, distributions=[0.2]*5)
+
+Dependencies:
+-------------
+- torch, torchvision, tqdm, matplotlib
+- CIFAR-10 dataset from torchvision
+"""
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -9,7 +65,6 @@ from typing import List, Tuple, Optional
 import random
 import math
 import matplotlib.pyplot as plt
-
 
 ### Basic Model
 class SmallConvBlock(nn.Module):

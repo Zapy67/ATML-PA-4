@@ -1,9 +1,52 @@
+"""
+fed_methods.py
+====================
+This module defines the base class `FedMethod` and implements the `FedSGD` algorithm 
+for Federated Learning (FL) training.
+
+Federated methods define how client updates are aggregated and how the server model 
+is updated across communication rounds. This modular design allows easy extension 
+to other FL methods such as FedAvg, FedProx, FedSAM, etc.
+
+Classes:
+---------
+- FedMethod: 
+    Abstract base class specifying the FL interface for client/server training, 
+    aggregation, and evaluation.
+
+- FedSGD:
+    Implements the classic Federated Stochastic Gradient Descent algorithm where:
+    - Each client trains on its local data for one epoch using SGD.
+    - The server aggregates the model parameters via weighted averaging.
+    - Evaluation compares federated and centralized training progress.
+
+Key Functions:
+--------------
+- exec_client_round(): 
+    Syncs clients with the server and trains locally.
+- exec_server_round(): 
+    Aggregates client models into the server using weighted averaging.
+- evaluate_round(): 
+    Compares test accuracy/loss between federated and centralized models.
+- evaluate_server(): 
+    Final evaluation at the end of training.
+
+Usage Example:
+--------------
+    fed_method = FedSGD(client_weights=[1, 1, 2])
+    fed_method.exec_client_round(server, clients, client_dataloaders, device="cuda", lr=0.01)
+    fed_method.exec_server_round(clients, server)
+    fed_method.evaluate_round(server, central_model, test_loader=test_loader, device="cuda")
+"""
+
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from typing import List, Optional, Sequence, Dict
 from utils import (
     SmallCNN,
     train_model_one_epoch,
+    evaluate_model_on_test,
 )
 
 class FedMethod:
@@ -13,55 +56,153 @@ class FedMethod:
     def __init__(self):
         pass
 
-    def exec_round(self, clients: List[SmallCNN], server: SmallCNN):
-        pass
+    def exec_server_round(self, clients: List[SmallCNN], server: SmallCNN, **kwargs):
+        raise NotImplementedError
+    
+    def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN], **kwargs):
+        raise NotImplementedError
+
+    def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
+        raise NotImplementedError
+    
+    def evaluate_server(self, server: SmallCNN, central: SmallCNN, **kwargs):
+        raise NotImplementedError
 
 class FedSGD(FedMethod):
     """
     Federated SGD aggregator.
 
     Args:
-        client_weights (Optional[Sequence[float]]): optional per-client weights, for e.g. domain representation ratio: N_i / N or simply N_i. If None,
-            equal weights are used.
+        client_weights (Optional[Sequence[float]]): optional per-client weights, If None,
+            weights default to client dataset sizes (N_i / sum_j N_j).
     """
     def __init__(self, client_weights: Optional[Sequence[float]] = None):
         super().__init__()
         self.client_weights = None if client_weights is None else list(client_weights)
 
     def _normalize_weights(self, n_clients: int) -> List[float]:
-        if self.client_weights is None:
-            return [1.0 / n_clients] * n_clients
-        if len(self.client_weights) != n_clients:
-            raise ValueError("Length of client_weights must equal number of clients.")
-        w = [float(x) for x in self.client_weights]
-        s = sum(w)
-        if s <= 0.0:
-            raise ValueError("Sum of client_weights must be positive.")
-        return [x / s for x in w]
+        if self.client_weights is not None:
+            if len(self.client_weights) != n_clients:
+                raise ValueError("Length of client_weights must equal number of clients.")
+            w = [float(x) for x in self.client_weights]
+            s = sum(w)
+            if s <= 0.0:
+                raise ValueError("Sum of client_weights must be positive.")
+            return [x / s for x in w]
 
-    def exec_round(self, clients: List[SmallCNN], server: SmallCNN):
+        # Fallback: equal weights
+        return [1.0 / n_clients] * n_clients
+
+    def exec_server_round(self, clients: List[SmallCNN], server: SmallCNN, **kwargs):
         """
         Execute one federated SGD round: average client gradients (weighted) and update server params.
 
         Args:
             clients: list of SmallCNNs trained for one epoch.
             server: the server model (nn.Module) whose parameters will be updated.
-
-        Returns:
-            dict with keys:
-              - "weighted_loss": float weighted average of client losses (detached)
-              - "grad_norm": float L2 norm of aggregated gradients (after averaging)
         """
-        if not isinstance(clients, (list, tuple)):
-            raise TypeError("clients must be a list/tuple of SmallCNN Models.")
 
         n_clients = len(clients)
+        device = kwargs['device']
+        lr = kwargs.get('lr', 0.001)
+
         if n_clients == 0:
             raise ValueError("clients must contain at least one Model.")
         
         # normalize weights
         weights = self._normalize_weights(n_clients)
 
+        server_optimizer: torch.optim.SGD = kwargs.get('server_optimizer', torch.optim.SGD(server.parameters(), lr=lr))
+
+        # with torch.no_grad():
+        #     for server_param, *client_params in zip(server.parameters(), *[c.parameters() for c in clients]):
+        #         server_param.data.copy_(sum(w * p for w,p in zip(weights, client_params)))
+
         with torch.no_grad():
-            for server_param, *client_params in zip(server.parameters(), *[c.parameters() for c in clients]):
-                server_param.data.copy_(sum(w * p for w,p in zip(weights, client_params)))
+            for p_idx, server_param in enumerate(server.parameters()):
+                agg_grad = None
+
+                for j, client in enumerate(clients):
+                    client_param = list(client.parameters())[p_idx]
+                    client_grad: torch.Tensor = client_param.grad
+                    if client_grad is None:
+                        continue
+                    
+                    if client_grad.device != server_param.device:
+                        client_grad = client_grad.to(server_param.device)
+
+                    weighted = client_grad.mul(weights[j])
+
+                    if agg_grad is None:
+                        agg_grad = weighted.clone()
+                    else:
+                        agg_grad.add_(weighted)
+
+                if agg_grad is not None:
+                    server_param.grad = agg_grad.clone()
+                else:
+                    server_param.grad = None
+
+        server_optimizer.step()
+        server_optimizer.zero_grad()
+
+    def _train_client(self, client: SmallCNN, dataloader: DataLoader, criterion: nn.CrossEntropyLoss, device):
+        client.to(device)
+        client.train()
+
+        for p in client.parameters():
+            p.grad = None
+        
+        total_samples = 0.0
+        total_loss_sum = 0.0
+
+        for batch in dataloader:
+            inputs, targets = batch
+            inputs, targets = inputs.to(device), targets.to(device)
+
+            out = client(inputs)
+            loss = criterion(out, targets)
+            loss.backward()
+
+            total_loss_sum += float(loss.detach().cpu().item())
+            total_samples += inputs.size(0)
+        
+        if total_samples == 0:
+            for p in client.parameters():
+                p.grad = None
+
+            return 0, 0.0
+        
+        # convert summed gradients into *average per-sample gradients* for this client
+        with torch.no_grad():
+            for p in client.parameters():
+                if p.grad is None:
+                    continue
+                p.grad.div_(total_samples)
+
+        return total_samples, total_loss_sum
+
+    def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN], client_dataloaders: List[DataLoader], **kwargs):
+
+        device = kwargs['device']
+        lr = kwargs['lr']
+
+        criterion = nn.CrossEntropyLoss(reduction='sum')
+
+        for client, loader in zip(clients, client_dataloaders):
+            client.load_state_dict(server.state_dict())
+            self._train_client(client, loader, criterion, device)
+
+    def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
+        criterion = nn.CrossEntropyLoss()
+        device = kwargs['device']
+        test_loader = kwargs['test_loader']
+
+        server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
+        central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
+
+        print(f"FedSGD  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
+        print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
+
+    def evaluate_server(self, server: SmallCNN, central: SmallCNN, **kwargs):
+        self.evaluate_round(server, central, **kwargs)
