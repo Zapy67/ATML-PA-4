@@ -43,7 +43,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from typing import List, Optional, Sequence, Dict
-from utils import (
+from fed_lib.utils import (
     SmallCNN,
     train_model_one_epoch,
     evaluate_model_on_test,
@@ -118,6 +118,8 @@ class FedSGD(FedMethod):
         #     for server_param, *client_params in zip(server.parameters(), *[c.parameters() for c in clients]):
         #         server_param.data.copy_(sum(w * p for w,p in zip(weights, client_params)))
 
+        print("Applying FedSGD on Server")
+
         with torch.no_grad():
             for p_idx, server_param in enumerate(server.parameters()):
                 agg_grad = None
@@ -189,7 +191,9 @@ class FedSGD(FedMethod):
 
         criterion = nn.CrossEntropyLoss(reduction='sum')
 
-        for client, loader in zip(clients, client_dataloaders):
+        for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
+            print(f"Training Client {i}/{len(clients)}")
+
             client.load_state_dict(server.state_dict())
             self._train_client(client, loader, criterion, device)
 

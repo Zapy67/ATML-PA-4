@@ -144,17 +144,16 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
     running_total = 0
 
     pbar = tqdm.tqdm(train_loader, desc="Train", leave=False)
+    optimizer.zero_grad()
     for batch in pbar:
         inputs, targets = batch
         inputs: torch.Tensor = inputs.to(device, non_blocking=True)
         targets: torch.Tensor = targets.to(device, non_blocking=True)
-
-        optimizer.zero_grad()
+        
         outputs: torch.Tensor = model(inputs)
         loss: torch.Tensor = criterion(outputs, targets)
         loss.backward()
-        optimizer.step()
-
+        
         # bookkeeping
         running_loss += loss.item() * inputs.size(0)
         _, preds = torch.max(outputs, dim=1)
@@ -165,6 +164,8 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
         avg_loss = running_loss / running_total
         avg_acc = running_correct / running_total
         pbar.set_postfix({'loss': f"{avg_loss:.4f}", 'acc': f"{avg_acc:.4f}"})
+
+    optimizer.step()
     
     avg_loss = running_loss / running_total if running_total > 0 else 0.0
     accuracy = running_correct / running_total if running_total > 0 else 0.0

@@ -29,14 +29,14 @@ Usage:
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, ConcatDataset
-from utils import (
+from fed_lib.utils import (
     SmallCNN,
     train_model_one_epoch,
     evaluate_model_on_test,
     get_homogenous_domains,
     get_cifar10,
 )
-from fed_methods import (
+from fed_lib.fed_methods import (
     FedMethod,
 )
 from typing import List
