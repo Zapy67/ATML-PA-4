@@ -80,7 +80,12 @@ class FedSGD(FedMethod):
         super().__init__()
         self.client_weights = None if client_weights is None else list(client_weights)
 
-    def _normalize_weights(self, n_clients: int) -> List[float]:
+    def _normalize_weights(self, n_clients: int, client_sizes: Optional[List[int]] = None) -> List[float]:
+        if client_sizes is not None:
+            total_size = sum(client_sizes)
+            if total_size > 0:
+                return [size / total_size for size in client_sizes]
+
         if self.client_weights is not None:
             if len(self.client_weights) != n_clients:
                 raise ValueError("Length of client_weights must equal number of clients.")
@@ -105,52 +110,54 @@ class FedSGD(FedMethod):
         n_clients = len(clients)
         device = kwargs['device']
         lr = kwargs.get('lr', 0.001)
+        client_sizes = kwargs.get('client_sizes', None)
 
         if n_clients == 0:
-            raise ValueError("clients must contain at least one Model.")
+            raise ValueError("clients must contain at least one model.")
         
         # normalize weights
         weights = self._normalize_weights(n_clients)
 
         server_optimizer: torch.optim.SGD = kwargs.get('server_optimizer', torch.optim.SGD(server.parameters(), lr=lr))
 
-        # with torch.no_grad():
-        #     for server_param, *client_params in zip(server.parameters(), *[c.parameters() for c in clients]):
-        #         server_param.data.copy_(sum(w * p for w,p in zip(weights, client_params)))
-
         print("Applying FedSGD on Server")
+        print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
+
+        for p in server.parameters():
+            p.grad = None
 
         with torch.no_grad():
             for p_idx, server_param in enumerate(server.parameters()):
                 agg_grad = None
 
-                for j, client in enumerate(clients):
+                for client_idx, (client, weight) in enumerate(zip(clients, weights)):
                     client_param = list(client.parameters())[p_idx]
-                    client_grad: torch.Tensor = client_param.grad
+                    client_grad = client_param.grad
+                    
                     if client_grad is None:
                         continue
                     
+                    # Ensure same device
                     if client_grad.device != server_param.device:
                         client_grad = client_grad.to(server_param.device)
-
-                    weighted = client_grad.mul(weights[j])
-
+                    
+                    # Weight the gradient
+                    weighted_grad = client_grad * weight
+                    
                     if agg_grad is None:
-                        agg_grad = weighted.clone()
+                        agg_grad = weighted_grad.clone()
                     else:
-                        agg_grad.add_(weighted)
+                        agg_grad += weighted_grad
 
                 if agg_grad is not None:
-                    server_param.grad = agg_grad.clone()
-                else:
-                    server_param.grad = None
+                    server_param.grad = agg_grad
 
-        all_server_grads = [p.grad.detach().flatten() for p in server.parameters() if p.grad is not None]
+        # Debug: print aggregated gradient norm
+        all_server_grads = [p.grad.detach().flatten() for p in server.parameters() 
+                           if p.grad is not None]
         if all_server_grads:
-            gvec = torch.cat(all_server_grads)
-            print("AGG server grad norm:", float(torch.norm(gvec)))
-        else:
-            print("AGG server grad is empty")
+            grad_vec = torch.cat(all_server_grads)
+            print(f"Aggregated server grad_norm: {float(torch.norm(grad_vec)):.4f}")
 
 
         server_optimizer.step()
@@ -178,40 +185,41 @@ class FedSGD(FedMethod):
             total_samples += inputs.size(0)
         
         if total_samples == 0:
-            for p in client.parameters():
-                p.grad = None
-
             return 0, 0.0
         
-        # convert summed gradients into *average per-sample gradients* for this client
-        with torch.no_grad():
-            for p in client.parameters():
-                if p.grad is None:
-                    continue
-                p.grad.div_(total_samples)
+        avg_loss = total_loss_sum / total_samples
 
-        return total_samples, total_loss_sum
+        return total_samples, avg_loss
 
     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN], client_dataloaders: List[DataLoader], **kwargs):
 
         device = kwargs['device']
         lr = kwargs['lr']
 
-        criterion = nn.CrossEntropyLoss(reduction='sum')
+        criterion = nn.CrossEntropyLoss()
+
+        client_sizes = []
 
         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
-            print(f"Training Client {i}/{len(clients)}")
+            print(f"Training Client {i+1}/{len(clients)}")
 
             client.load_state_dict(server.state_dict())
-            self._train_client(client, loader, criterion, device)
-        
-        for idx, client in enumerate(clients):
-            all_cg = [p.grad.detach().flatten() for p in client.parameters() if p.grad is not None]
-            if all_cg:
-                cvec = torch.cat(all_cg)
-                print(f"client {idx} avg-grad norm: {float(torch.norm(cvec))}, size={len(client_dataloaders[idx])}")
+            n_samples, avg_loss = self._train_client(client, loader, criterion, device)
+
+            client_sizes.append(n_samples)
+
+            # Debug: print gradient norm
+            all_grads = [p.grad.detach().flatten() for p in client.parameters() 
+                        if p.grad is not None]
+            if all_grads:
+                grad_vec = torch.cat(all_grads)
+                grad_norm = float(torch.norm(grad_vec))
+                print(f"  Client {i+1}: samples={n_samples}, loss={avg_loss:.4f}, "
+                        f"grad_norm={grad_norm:.4f}")
             else:
-                print(f"client {idx} grad empty")
+                print(f"  Client {i+1}: No gradients computed!")
+
+        kwargs['client_sizes'] = client_sizes
 
 
     def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
