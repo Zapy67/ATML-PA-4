@@ -130,7 +130,7 @@ class FedSGD(FedMethod):
             for p_idx, server_param in enumerate(server.parameters()):
                 agg_grad = None
 
-                for client_idx, (client, weight) in enumerate(zip(clients, weights)):
+                for client, weight in zip(clients, weights):
                     client_param = list(client.parameters())[p_idx]
                     client_grad = client_param.grad
                     
@@ -159,7 +159,6 @@ class FedSGD(FedMethod):
             grad_vec = torch.cat(all_server_grads)
             print(f"Aggregated server grad_norm: {float(torch.norm(grad_vec)):.4f}")
 
-
         server_optimizer.step()
         server_optimizer.zero_grad()
 
@@ -171,7 +170,7 @@ class FedSGD(FedMethod):
             p.grad = None
         
         total_samples = 0.0
-        total_loss_sum = 0.0
+        total_loss= 0.0
 
         for batch in dataloader:
             inputs, targets = batch
@@ -179,15 +178,23 @@ class FedSGD(FedMethod):
 
             out = client(inputs)
             loss = criterion(out, targets)
-            loss.backward()
+            
+            batch_size = inputs.size(0)
+            scaled_loss = loss * batch_size
+            scaled_loss.backward()
 
-            total_loss_sum += float(loss.detach().cpu().item())
+            total_loss += loss.item() * batch_size
             total_samples += inputs.size(0)
         
         if total_samples == 0:
             return 0, 0.0
         
-        avg_loss = total_loss_sum / total_samples
+        with torch.no_grad():
+            for p in client.parameters():
+                if p.grad is not None:
+                    p.grad.div_(total_samples)
+        
+        avg_loss = total_loss / total_samples
 
         return total_samples, avg_loss
 

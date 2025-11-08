@@ -127,7 +127,7 @@ class SmallCNN(nn.Module):
 
         return x
 
-## To-Do Model Training Functions/Class
+## Model Training Functions/Class
 
 def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: nn.CrossEntropyLoss, optimizer: optim.Optimizer, device: torch.device):
     """
@@ -169,11 +169,6 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
         pbar.set_postfix({'loss': f"{avg_loss:.4f}", 'acc': f"{avg_acc:.4f}"})
 
     if running_total > 0:
-        # convert summed grads -> average per-sample grads (match clients)
-        with torch.no_grad():
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.div_(running_total)
 
         all_model = [p.grad.detach().flatten() for p in model.parameters() if p.grad is not None]
         if all_model:
