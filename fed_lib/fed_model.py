@@ -90,7 +90,8 @@ class Federation:
             print(f"Evaluate on round {round+1}:")
             self.federated_method.evaluate_round(self.server, central_model, **kwargs)
 
-            compare_model_parameters(self.server, central_model, "Server", "Central", verbose=verbose)
+            if verbose:
+                compare_model_parameters(self.server, central_model, "Server", "Central")
             
         
         print("Training Complete!")
