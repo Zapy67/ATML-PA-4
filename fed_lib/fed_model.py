@@ -60,7 +60,7 @@ class Federation:
         self.federated_method = federate_method
 
     def train(self, rounds: int, lr = 0.001, **kwargs):
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(reduction='sum')
         
         central_model = deepcopy(self.server)
         central_optimizer = torch.optim.SGD(central_model.parameters(), lr=lr)
@@ -75,13 +75,17 @@ class Federation:
             print(f"\n--- Round {round+1}/{rounds} ---")
             # Train
 
+            print("Training Clients")
             self.federated_method.exec_client_round(self.server, self.clients, self.client_dataloaders, **kwargs)
             
+            print("Training Server")
             self.federated_method.exec_server_round(self.clients, self.server, **kwargs)
 
+            print("Training Central")
             train_model_one_epoch(central_model, self.centralized_train_loader, criterion, central_optimizer, self.device)
 
             # Test
+            print(f"Evaluate on round {round+1}:")
             self.federated_method.evaluate_round(self.server, central_model, **kwargs)
             
         

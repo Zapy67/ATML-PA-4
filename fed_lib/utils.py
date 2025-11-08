@@ -139,12 +139,14 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
     model.train()
     model.to(device)
 
+    for p in model.parameters():
+        p.grad = None
+
     running_loss = 0.0
     running_correct = 0
     running_total = 0
 
     pbar = tqdm.tqdm(train_loader, desc="Train", leave=False)
-    optimizer.zero_grad()
     for batch in pbar:
         inputs, targets = batch
         inputs: torch.Tensor = inputs.to(device, non_blocking=True)
@@ -165,8 +167,21 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
         avg_acc = running_correct / running_total
         pbar.set_postfix({'loss': f"{avg_loss:.4f}", 'acc': f"{avg_acc:.4f}"})
 
-    optimizer.step()
-    
+    if running_total > 0:
+        # convert summed grads -> average per-sample grads (match clients)
+        with torch.no_grad():
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(running_total)
+
+        all_model = [p.grad.detach().flatten() for p in model.parameters() if p.grad is not None]
+        if all_model:
+            cvec = torch.cat(all_model)
+            print("model avg grad norm:", float(torch.norm(cvec)))
+
+        optimizer.step()
+        optimizer.zero_grad()
+
     avg_loss = running_loss / running_total if running_total > 0 else 0.0
     accuracy = running_correct / running_total if running_total > 0 else 0.0
 
@@ -223,7 +238,7 @@ def evaluate_model_on_test(model: SmallCNN, test_loader: DataLoader, criterion: 
     running_total = 0
 
     pbar = tqdm.tqdm(test_loader, desc="Test ", leave=False)
-    with torch.no_grad():
+    with torch.inference_mode():
         for batch in pbar:
             inputs, targets = batch
             inputs: torch.Tensor = inputs.to(device, non_blocking=True)

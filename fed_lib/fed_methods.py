@@ -145,6 +145,14 @@ class FedSGD(FedMethod):
                 else:
                     server_param.grad = None
 
+        all_server_grads = [p.grad.detach().flatten() for p in server.parameters() if p.grad is not None]
+        if all_server_grads:
+            gvec = torch.cat(all_server_grads)
+            print("AGG server grad norm:", float(torch.norm(gvec)))
+        else:
+            print("AGG server grad is empty")
+
+
         server_optimizer.step()
         server_optimizer.zero_grad()
 
@@ -196,6 +204,15 @@ class FedSGD(FedMethod):
 
             client.load_state_dict(server.state_dict())
             self._train_client(client, loader, criterion, device)
+        
+        for idx, client in enumerate(clients):
+            all_cg = [p.grad.detach().flatten() for p in client.parameters() if p.grad is not None]
+            if all_cg:
+                cvec = torch.cat(all_cg)
+                print(f"client {idx} avg-grad norm: {float(torch.norm(cvec))}, size={len(client_dataloaders[idx])}")
+            else:
+                print(f"client {idx} grad empty")
+
 
     def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()
