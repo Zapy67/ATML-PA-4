@@ -45,13 +45,13 @@ from typing import List
 from copy import deepcopy
 
 class Federation:
-    def __init__(self, num_clients: int, federate_method: FedMethod, domains: List[int], device):
+    def __init__(self, num_clients: int, federate_method: FedMethod, domains: List[int], device, batch_size=32, pin_memory=False, num_workers=0):
         
         self.clients = [SmallCNN().to(device) for _ in range(num_clients)]
         self.server = SmallCNN().to(device)
         self.device = device
 
-        trainloader, self.test_loader = get_cifar10()
+        trainloader, self.test_loader = get_cifar10(batch_size=batch_size, pin_memory=pin_memory, num_workers=num_workers)
 
         self.client_dataloaders = get_homogenous_domains(trainloader, num_clients, domains)
 

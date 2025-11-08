@@ -247,7 +247,7 @@ def evaluate_model_on_test(model: SmallCNN, test_loader: DataLoader, criterion: 
 
 ### Dataset
 
-def get_cifar10(root='./data', train_transform=None, test_transform=None, batch_size=32):
+def get_cifar10(root='./data', train_transform=None, test_transform=None, batch_size=32, pin_memory=False, num_workers=0):
     """
     Create CIFAR-10 DataLoaders.
 
@@ -281,8 +281,8 @@ def get_cifar10(root='./data', train_transform=None, test_transform=None, batch_
     train_dataset = CIFAR10(root=root, train=True, transform=train_transform, download=True)
     test_dataset = CIFAR10(root=root, train=False, transform=test_transform, download=True)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=pin_memory, num_workers=num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, pin_memory=pin_memory, num_workers=num_workers)
 
     return train_loader, test_loader
 
