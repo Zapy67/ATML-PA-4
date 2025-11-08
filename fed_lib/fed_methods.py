@@ -108,9 +108,6 @@ class FedSGD(FedMethod):
         """
 
         n_clients = len(clients)
-        device = kwargs['device']
-        lr = kwargs['lr']
-        client_sizes = kwargs.get('client_sizes', None)
         verbose = kwargs['verbose']
 
         if n_clients == 0:
@@ -125,8 +122,7 @@ class FedSGD(FedMethod):
         if verbose:
             print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
 
-        for p in server.parameters():
-            p.grad = None
+        server_optimizer.zero_grad(set_to_none=True)
 
         with torch.no_grad():
             for p_idx, server_param in enumerate(server.parameters()):
@@ -163,7 +159,6 @@ class FedSGD(FedMethod):
                 print(f"Aggregated server grad_norm: {float(torch.norm(grad_vec)):.4f}")
 
         server_optimizer.step()
-        server_optimizer.zero_grad()
 
     def _train_client(self, client: SmallCNN, dataloader: DataLoader, criterion: nn.CrossEntropyLoss, device):
         client.to(device)
@@ -204,7 +199,6 @@ class FedSGD(FedMethod):
     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN], client_dataloaders: List[DataLoader], **kwargs):
 
         device = kwargs['device']
-        lr = kwargs['lr']
         verbose = kwargs['verbose']
 
         criterion = nn.CrossEntropyLoss()

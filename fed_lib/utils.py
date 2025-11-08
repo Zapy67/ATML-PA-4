@@ -31,27 +31,6 @@ Intended Use:
 -------------
 This file acts as the shared utility module for the FL framework (used by `fed_model.py`
 and `fed_methods.py`).
-
-Example:
---------
-    from utils import SmallCNN, get_cifar10, get_homogenous_domains, train_model_one_epoch
-
-    # Prepare data and model
-    train_loader, test_loader = get_cifar10(batch_size=64)
-    model = SmallCNN()
-    
-    # Train one epoch
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
-    criterion = nn.CrossEntropyLoss()
-    loss, acc = train_model_one_epoch(model, train_loader, criterion, optimizer, "cuda")
-
-    # Create client splits
-    client_loaders = get_homogenous_domains(train_loader, clients=5, distributions=[0.2]*5)
-
-Dependencies:
--------------
-- torch, torchvision, tqdm, matplotlib
-- CIFAR-10 dataset from torchvision
 """
 
 import torch
