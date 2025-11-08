@@ -140,8 +140,7 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
     model.train()
     model.to(device)
 
-    for p in model.parameters():
-        p.grad = None
+    optimizer.zero_grad()
 
     running_loss = 0.0
     running_correct = 0
@@ -155,7 +154,10 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
         
         outputs: torch.Tensor = model(inputs)
         loss: torch.Tensor = criterion(outputs, targets)
-        loss.backward()
+        
+        batch_size = inputs.size(0)
+        scaled_loss = loss * batch_size
+        scaled_loss.backward()
         
         # bookkeeping
         running_loss += loss.item() * inputs.size(0)
@@ -169,14 +171,20 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
         pbar.set_postfix({'loss': f"{avg_loss:.4f}", 'acc': f"{avg_acc:.4f}"})
 
     if running_total > 0:
+        with torch.no_grad():
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(running_total)
+        
+        # Debug
+        all_grads = [p.grad.detach().flatten() for p in model.parameters() 
+                    if p.grad is not None]
+        if all_grads:
+            grad_vec = torch.cat(all_grads)
+            print(f"Central avg grad norm: {float(torch.norm(grad_vec)):.4f}")
 
-        all_model = [p.grad.detach().flatten() for p in model.parameters() if p.grad is not None]
-        if all_model:
-            cvec = torch.cat(all_model)
-            print("model avg grad norm:", float(torch.norm(cvec)))
-
-        optimizer.step()
-        optimizer.zero_grad()
+    # Update once
+    optimizer.step()
 
     avg_loss = running_loss / running_total if running_total > 0 else 0.0
     accuracy = running_correct / running_total if running_total > 0 else 0.0

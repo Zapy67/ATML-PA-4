@@ -61,7 +61,7 @@ class Federation:
         self.federated_method = federate_method
 
     def train(self, rounds: int, lr = 0.01, **kwargs):
-        criterion = nn.CrossEntropyLoss(reduction='sum')
+        criterion = nn.CrossEntropyLoss()
         
         central_model = deepcopy(self.server)
         central_optimizer = torch.optim.SGD(central_model.parameters(), lr=lr)
