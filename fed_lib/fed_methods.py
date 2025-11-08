@@ -109,7 +109,7 @@ class FedSGD(FedMethod):
 
         n_clients = len(clients)
         device = kwargs['device']
-        lr = kwargs.get('lr', 0.001)
+        lr = kwargs['lr']
         client_sizes = kwargs.get('client_sizes', None)
         verbose = kwargs['verbose']
 
@@ -119,7 +119,7 @@ class FedSGD(FedMethod):
         # normalize weights
         weights = self._normalize_weights(n_clients)
 
-        server_optimizer: torch.optim.SGD = kwargs.get('server_optimizer', torch.optim.SGD(server.parameters(), lr=lr))
+        server_optimizer: torch.optim.SGD = kwargs['server_optimizer']
 
         print("Applying FedSGD on Server")
         if verbose:
