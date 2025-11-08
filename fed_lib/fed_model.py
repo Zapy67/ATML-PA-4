@@ -35,6 +35,7 @@ from fed_lib.utils import (
     evaluate_model_on_test,
     get_homogenous_domains,
     get_cifar10,
+    compare_model_parameters
 )
 from fed_lib.fed_methods import (
     FedMethod,
@@ -59,7 +60,7 @@ class Federation:
 
         self.federated_method = federate_method
 
-    def train(self, rounds: int, lr = 0.001, **kwargs):
+    def train(self, rounds: int, lr = 0.01, **kwargs):
         criterion = nn.CrossEntropyLoss(reduction='sum')
         
         central_model = deepcopy(self.server)
@@ -92,6 +93,8 @@ class Federation:
         print("Training Complete!")
 
         self.federated_method.evaluate_server(self.server, central_model, **kwargs)
+
+        compare_model_parameters(self.server, central_model, "Server", "Central")
 
     def test(self):
         raise NotImplementedError

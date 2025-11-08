@@ -61,10 +61,11 @@ from torch.utils.data import DataLoader, Subset, Dataset
 from torchvision.datasets import CIFAR10
 from torchvision import transforms
 import tqdm
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import random
 import math
 import matplotlib.pyplot as plt
+import numpy as np
 
 ### Basic Model
 class SmallConvBlock(nn.Module):
@@ -436,3 +437,127 @@ def get_homogenous_domains(
 
 def get_heterogenous_domains(trainset: DataLoader, clients: int, distributions: List[int], alpha: int) -> List[DataLoader]:
     pass
+
+
+### Computing Model Differences
+
+def compute_model_difference(model1: nn.Module, model2: nn.Module, 
+                            norm_type: str = 'l2') -> float:
+    """
+    Compute the norm of the difference between two models' parameters.
+    
+    Args:
+        model1: First model
+        model2: Second model
+        norm_type: Type of norm to compute ('l2', 'l1', 'linf')
+    
+    Returns:
+        float: Norm of the parameter difference
+    
+    Example:
+        >>> diff = compute_model_difference(fed_model, central_model)
+        >>> print(f"Parameter difference: {diff:.6e}")
+    """
+    diff_list = []
+    
+    for p1, p2 in zip(model1.parameters(), model2.parameters()):
+        if p1.shape != p2.shape:
+            raise ValueError(f"Model architectures don't match: {p1.shape} vs {p2.shape}")
+        
+        diff = (p1 - p2).detach().flatten()
+        diff_list.append(diff)
+    
+    # Concatenate all parameter differences
+    all_diffs = torch.cat(diff_list)
+    
+    if norm_type == 'l2':
+        return float(torch.norm(all_diffs, p=2))
+    elif norm_type == 'l1':
+        return float(torch.norm(all_diffs, p=1))
+    elif norm_type == 'linf':
+        return float(torch.max(torch.abs(all_diffs)))
+    else:
+        raise ValueError(f"Unknown norm_type: {norm_type}")
+    
+def compare_model_parameters(model1: nn.Module, model2: nn.Module, 
+                            model1_name: str = "Model 1",
+                            model2_name: str = "Model 2",
+                            show_top_k: int = 5) -> Dict[str, float]:
+    """
+    Detailed per-layer comparison of two models.
+    
+    Args:
+        model1: First model (e.g., FedSGD)
+        model2: Second model (e.g., Centralized)
+        model1_name: Display name for model1
+        model2_name: Display name for model2
+        show_top_k: Number of layers with largest differences to display
+    
+    Returns:
+        dict: Statistics about the differences
+    
+    Example:
+        >>> stats = compare_model_parameters(fed_model, central_model,
+        ...                                   "FedSGD", "Centralized")
+    """
+    layer_diffs = []
+    
+    print(f"\n{'='*70}")
+    print(f"Comparing {model1_name} vs {model2_name}")
+    print(f"{'='*70}")
+    
+    for (name1, p1), (name2, p2) in zip(model1.named_parameters(), 
+                                         model2.named_parameters()):
+        if name1 != name2:
+            print(f"Warning: Parameter name mismatch: {name1} vs {name2}")
+        
+        diff = (p1 - p2).detach()
+        
+        l2_diff = float(torch.norm(diff, p=2))
+        linf_diff = float(torch.max(torch.abs(diff)))
+        mean_abs_diff = float(torch.mean(torch.abs(diff)))
+        relative_diff = l2_diff / (float(torch.norm(p1, p=2)) + 1e-10)
+        
+        layer_diffs.append({
+            'name': name1,
+            'l2': l2_diff,
+            'linf': linf_diff,
+            'mean_abs': mean_abs_diff,
+            'relative': relative_diff,
+            'shape': tuple(p1.shape)
+        })
+    
+    # Sort by L2 difference
+    layer_diffs_sorted = sorted(layer_diffs, key=lambda x: x['l2'], reverse=True)
+    
+    # Print top-k largest differences
+    print(f"\nTop {show_top_k} layers with largest L2 differences:")
+    print(f"{'-'*70}")
+    print(f"{'Layer':<40} {'L2 Diff':>12} {'Rel Diff':>12}")
+    print(f"{'-'*70}")
+    
+    for i, layer_info in enumerate(layer_diffs_sorted[:show_top_k]):
+        print(f"{layer_info['name']:<40} {layer_info['l2']:>12.6e} {layer_info['relative']:>12.6e}")
+    
+    # Compute overall statistics
+    total_l2 = sum(ld['l2'] ** 2 for ld in layer_diffs) ** 0.5
+    total_linf = max(ld['linf'] for ld in layer_diffs)
+    avg_relative = np.mean([ld['relative'] for ld in layer_diffs])
+    
+    stats = {
+        'total_l2': total_l2,
+        'total_linf': total_linf,
+        'avg_relative_diff': avg_relative,
+        'num_parameters': sum(np.prod(ld['shape']) for ld in layer_diffs)
+    }
+    
+    print(f"\n{'='*70}")
+    print(f"Overall Statistics:")
+    print(f"{'='*70}")
+    print(f"Total L2 difference:        {stats['total_l2']:.6e}")
+    print(f"Total L-inf difference:     {stats['total_linf']:.6e}")
+    print(f"Avg relative difference:    {stats['avg_relative_diff']:.6e}")
+    print(f"Total parameters:           {stats['num_parameters']:,}")
+    print(f"{'='*70}\n")
+    
+    return stats
