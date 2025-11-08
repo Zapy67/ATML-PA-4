@@ -60,7 +60,7 @@ class Federation:
 
         self.federated_method = federate_method
 
-    def train(self, rounds: int, lr = 0.01, **kwargs):
+    def train(self, rounds: int, lr = 0.01, verbose=False, **kwargs):
         criterion = nn.CrossEntropyLoss()
         
         central_model = deepcopy(self.server)
@@ -71,6 +71,7 @@ class Federation:
         kwargs['lr'] = lr
         kwargs['test_loader'] = self.test_loader
         kwargs['server_optimizer'] = server_optimizer
+        kwargs['verbose'] = verbose
 
         for round in range(rounds):
             print(f"\n--- Round {round+1}/{rounds} ---")
@@ -83,7 +84,7 @@ class Federation:
             self.federated_method.exec_server_round(self.clients, self.server, **kwargs)
 
             print("Training Central")
-            train_model_one_epoch(central_model, self.centralized_train_loader, criterion, central_optimizer, self.device)
+            train_model_one_epoch(central_model, self.centralized_train_loader, criterion, central_optimizer, self.device, verbose)
 
             # Test
             print(f"Evaluate on round {round+1}:")

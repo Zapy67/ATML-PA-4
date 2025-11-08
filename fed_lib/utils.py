@@ -83,7 +83,10 @@ class SmallConvBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.ReLU()
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+            nn.Dropout(0.2),
         )
         
     def forward(self, x):
@@ -99,8 +102,6 @@ class SmallCNN(nn.Module):
     Architecture:
         - SmallConvBlock(3 -> 32)
         - SmallConvBlock(32 -> 64)
-        - MaxPool2d(2)
-        - AdaptiveAvgPool2d((1,1))
         - Flatten -> Linear(64 -> num_classes)
 
     Args:
@@ -112,7 +113,6 @@ class SmallCNN(nn.Module):
         self.backbone = nn.Sequential(
             SmallConvBlock(3, 32),
             SmallConvBlock(32, 64),
-            nn.MaxPool2d(2),
             nn.AdaptiveAvgPool2d((1,1))
         )
 
@@ -129,7 +129,7 @@ class SmallCNN(nn.Module):
 
 ## Model Training Functions/Class
 
-def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: nn.CrossEntropyLoss, optimizer: optim.Optimizer, device: torch.device):
+def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: nn.CrossEntropyLoss, optimizer: optim.Optimizer, device: torch.device, verbose=False):
     """
     Train model for one epoch.
 
@@ -177,11 +177,12 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
                     p.grad.div_(running_total)
         
         # Debug
-        all_grads = [p.grad.detach().flatten() for p in model.parameters() 
-                    if p.grad is not None]
-        if all_grads:
-            grad_vec = torch.cat(all_grads)
-            print(f"Central avg grad norm: {float(torch.norm(grad_vec)):.4f}")
+        if verbose:
+            all_grads = [p.grad.detach().flatten() for p in model.parameters() 
+                        if p.grad is not None]
+            if all_grads:
+                grad_vec = torch.cat(all_grads)
+                print(f"Central avg grad norm: {float(torch.norm(grad_vec)):.4f}")
 
     # Update once
     optimizer.step()

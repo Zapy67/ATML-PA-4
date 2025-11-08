@@ -111,6 +111,7 @@ class FedSGD(FedMethod):
         device = kwargs['device']
         lr = kwargs.get('lr', 0.001)
         client_sizes = kwargs.get('client_sizes', None)
+        verbose = kwargs['verbose']
 
         if n_clients == 0:
             raise ValueError("clients must contain at least one model.")
@@ -121,7 +122,8 @@ class FedSGD(FedMethod):
         server_optimizer: torch.optim.SGD = kwargs.get('server_optimizer', torch.optim.SGD(server.parameters(), lr=lr))
 
         print("Applying FedSGD on Server")
-        print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
+        if verbose:
+            print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
 
         for p in server.parameters():
             p.grad = None
@@ -153,11 +155,12 @@ class FedSGD(FedMethod):
                     server_param.grad = agg_grad
 
         # Debug: print aggregated gradient norm
-        all_server_grads = [p.grad.detach().flatten() for p in server.parameters() 
-                           if p.grad is not None]
-        if all_server_grads:
-            grad_vec = torch.cat(all_server_grads)
-            print(f"Aggregated server grad_norm: {float(torch.norm(grad_vec)):.4f}")
+        if verbose:
+            all_server_grads = [p.grad.detach().flatten() for p in server.parameters() 
+                            if p.grad is not None]
+            if all_server_grads:
+                grad_vec = torch.cat(all_server_grads)
+                print(f"Aggregated server grad_norm: {float(torch.norm(grad_vec)):.4f}")
 
         server_optimizer.step()
         server_optimizer.zero_grad()
@@ -202,6 +205,7 @@ class FedSGD(FedMethod):
 
         device = kwargs['device']
         lr = kwargs['lr']
+        verbose = kwargs['verbose']
 
         criterion = nn.CrossEntropyLoss()
 
@@ -216,15 +220,16 @@ class FedSGD(FedMethod):
             client_sizes.append(n_samples)
 
             # Debug: print gradient norm
-            all_grads = [p.grad.detach().flatten() for p in client.parameters() 
-                        if p.grad is not None]
-            if all_grads:
-                grad_vec = torch.cat(all_grads)
-                grad_norm = float(torch.norm(grad_vec))
-                print(f"  Client {i+1}: samples={n_samples}, loss={avg_loss:.4f}, "
-                        f"grad_norm={grad_norm:.4f}")
-            else:
-                print(f"  Client {i+1}: No gradients computed!")
+            if verbose:
+                all_grads = [p.grad.detach().flatten() for p in client.parameters() 
+                            if p.grad is not None]
+                if all_grads:
+                    grad_vec = torch.cat(all_grads)
+                    grad_norm = float(torch.norm(grad_vec))
+                    print(f"  Client {i+1}: samples={n_samples}, loss={avg_loss:.4f}, "
+                            f"grad_norm={grad_norm:.4f}")
+                else:
+                    print(f"  Client {i+1}: No gradients computed!")
 
         kwargs['client_sizes'] = client_sizes
 
