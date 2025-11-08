@@ -486,7 +486,7 @@ def compute_model_difference(model1: nn.Module, model2: nn.Module,
 def compare_model_parameters(model1: nn.Module, model2: nn.Module, 
                             model1_name: str = "Model 1",
                             model2_name: str = "Model 2",
-                            show_top_k: int = 5) -> Dict[str, float]:
+                            show_top_k: int = 5, verbose=False) -> Dict[str, float]:
     """
     Detailed per-layer comparison of two models.
     
@@ -506,9 +506,11 @@ def compare_model_parameters(model1: nn.Module, model2: nn.Module,
     """
     layer_diffs = []
     
-    print(f"\n{'='*70}")
+    if verbose:
+        print(f"\n{'='*70}")
     print(f"Comparing {model1_name} vs {model2_name}")
-    print(f"{'='*70}")
+    if verbose:
+        print(f"{'='*70}")
     
     for (name1, p1), (name2, p2) in zip(model1.named_parameters(), 
                                          model2.named_parameters()):
@@ -536,9 +538,11 @@ def compare_model_parameters(model1: nn.Module, model2: nn.Module,
     
     # Print top-k largest differences
     print(f"\nTop {show_top_k} layers with largest L2 differences:")
-    print(f"{'-'*70}")
+    if verbose:
+        print(f"{'-'*70}")
     print(f"{'Layer':<40} {'L2 Diff':>12} {'Rel Diff':>12}")
-    print(f"{'-'*70}")
+    if verbose:
+        print(f"{'-'*70}")
     
     for i, layer_info in enumerate(layer_diffs_sorted[:show_top_k]):
         print(f"{layer_info['name']:<40} {layer_info['l2']:>12.6e} {layer_info['relative']:>12.6e}")
@@ -554,14 +558,18 @@ def compare_model_parameters(model1: nn.Module, model2: nn.Module,
         'avg_relative_diff': avg_relative,
         'num_parameters': sum(np.prod(ld['shape']) for ld in layer_diffs)
     }
-    
-    print(f"\n{'='*70}")
+
+    if verbose:  
+       print(f"\n{'='*70}")
     print(f"Overall Statistics:")
-    print(f"{'='*70}")
+    if verbose:
+        print(f"{'='*70}")
     print(f"Total L2 difference:        {stats['total_l2']:.6e}")
-    print(f"Total L-inf difference:     {stats['total_linf']:.6e}")
-    print(f"Avg relative difference:    {stats['avg_relative_diff']:.6e}")
+    if verbose:
+        print(f"Total L-inf difference:     {stats['total_linf']:.6e}")
+        print(f"Avg relative difference:    {stats['avg_relative_diff']:.6e}")
     print(f"Total parameters:           {stats['num_parameters']:,}")
-    print(f"{'='*70}\n")
+    if verbose:
+        print(f"{'='*70}\n")
     
     return stats

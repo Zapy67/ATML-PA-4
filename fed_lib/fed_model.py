@@ -89,13 +89,15 @@ class Federation:
             # Test
             print(f"Evaluate on round {round+1}:")
             self.federated_method.evaluate_round(self.server, central_model, **kwargs)
+
+            compare_model_parameters(self.server, central_model, "Server", "Central", verbose=verbose)
             
         
         print("Training Complete!")
 
         self.federated_method.evaluate_server(self.server, central_model, **kwargs)
 
-        compare_model_parameters(self.server, central_model, "Server", "Central")
+        compare_model_parameters(self.server, central_model, "Server", "Central", verbose=verbose)
 
     def test(self):
         raise NotImplementedError
