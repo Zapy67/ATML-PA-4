@@ -34,6 +34,7 @@ from fed_lib.utils import (
     train_model_one_epoch,
     evaluate_model_on_test,
     get_homogenous_domains,
+    get_heterogenous_domains,
     get_cifar10,
     compare_model_parameters
 )
@@ -45,7 +46,7 @@ from typing import List
 from copy import deepcopy
 
 class Federation:
-    def __init__(self, num_clients: int, federate_method: FedMethod, domains: List[int], device, batch_size=32, pin_memory=False, num_workers=0):
+    def __init__(self, num_clients: int, federate_method: FedMethod, partition: str, domains: List[int], alpha: float, device, batch_size=32, pin_memory=False, num_workers=0):
         
         self.clients = [SmallCNN().to(device) for _ in range(num_clients)]
         self.server = SmallCNN().to(device)
@@ -53,7 +54,14 @@ class Federation:
 
         trainloader, self.test_loader = get_cifar10(batch_size=batch_size, pin_memory=pin_memory, num_workers=num_workers)
 
-        self.client_dataloaders = get_homogenous_domains(trainloader, num_clients, domains)
+        if partition == "iid":
+            self.client_dataloaders = get_homogenous_domains(trainloader, num_clients, domains)
+        elif partition == "dirichlet":
+            self.client_dataloaders = get_heterogenous_domains(
+                trainloader, num_clients, min_require_size=20, alpha=alpha
+            )
+        else:
+            raise ValueError(f"Unknown partition method: {partition}")
 
         # Centralized dataset for comparison
         self.centralized_train_loader = deepcopy(trainloader)

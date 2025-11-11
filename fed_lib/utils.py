@@ -45,7 +45,9 @@ import random
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+from fedlab.utils.dataset import BasicPartitioner
 
+  
 ### Basic Model
 class SmallConvBlock(nn.Module):
     """
@@ -366,8 +368,6 @@ def _make_stratified_subsets(dataset, dl, distributions, clients, seed):
     # we will not artificially move samples — stratification is prioritized.
     return client_indices
 
-def _make_heterogenous_subsets(dataset, distributions, clients, seed, alpha):
-    pass
 
 def get_homogenous_domains(
         trainset: DataLoader,
@@ -418,8 +418,38 @@ def get_homogenous_domains(
 
     return client_train_loaders
 
-def get_heterogenous_domains(trainset: DataLoader, clients: int, distributions: List[int], alpha: int) -> List[DataLoader]:
-    pass
+def _make_heterogenous_subsets(dataset, num_clients, min_require_size, alpha, seed):
+    client_indices = BasicPartitioner(dataset.targets, num_clients, partition="noniid-labeldir", dir_alpha=alpha, seed=seed, min_require_size=min_require_size)
+    return client_indices
+
+def get_heterogenous_domains(
+        trainset: DataLoader,
+        clients: int, 
+        min_require_size: int, 
+        seed: int = 42, 
+        batch_size: int = 32,
+        alpha: float = 0.1,
+        ) -> List[DataLoader]:
+    
+    train_dataset = trainset.dataset
+    train_client_indices = _make_heterogenous_subsets(train_dataset, clients, min_require_size, alpha, seed)
+
+    # Build DataLoaders for each client, preserving some DataLoader kwargs
+    dl_kwargs = {}
+    if hasattr(trainset, "num_workers"):
+        dl_kwargs["num_workers"] = trainset.num_workers
+    if hasattr(trainset, "pin_memory"):
+        dl_kwargs["pin_memory"] = trainset.pin_memory
+
+    train_bs = batch_size or getattr(trainset, "batch_size", 32)
+
+    client_train_loaders = []
+
+    for j in range(clients):
+        train_sub = Subset(train_dataset, train_client_indices[j])
+        client_train_loaders.append(DataLoader(train_sub, batch_size=train_bs, shuffle=True, **dl_kwargs))
+
+    return client_train_loaders
 
 
 ### Computing Model Differences
