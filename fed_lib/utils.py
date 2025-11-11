@@ -582,3 +582,24 @@ def compare_model_parameters(model1: nn.Module, model2: nn.Module,
         print(f"{'='*70}\n")
     
     return stats
+
+#client drift
+def calculate_client_drift_metrics(global_model: nn.Module, 
+                                   local_models: List[nn.Module]) -> Dict[str, float]:
+    
+    per_client_drifts = []
+    for local_model in local_models:
+        squared_l2_distance = 0.0
+        
+        for global_param, local_param in zip(global_model.parameters(), local_model.parameters()):
+            param_diff = global_param - local_param
+            squared_l2_distance += (param_diff).square().sum()
+            
+        per_client_drifts.append(squared_l2_distance.sqrt_().item())
+
+    drift_summary = {
+        'mean_client_drift': np.mean(per_client_drifts),
+        'per_client_drifts': per_client_drifts
+    }
+
+    return drift_summary
