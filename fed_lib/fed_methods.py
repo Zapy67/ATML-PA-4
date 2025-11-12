@@ -317,7 +317,6 @@ class FedSAM(FedMethod):
         total_samples_processed = 0.0
         total_loss_accumulated = 0.0
         
-     
         local_optimizer = torch.optim.SGD(
             local_model.parameters(), 
             lr=learning_rate, 
@@ -496,7 +495,6 @@ class FedGH(FedMethod):
 
         total_samples_processed = 0.0
         total_loss_accumulated = 0.0
-        
      
         local_optimizer = torch.optim.SGD(
             local_model.parameters(), 
@@ -512,7 +510,6 @@ class FedGH(FedMethod):
             batch_inputs, batch_targets = data_batch
             batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
 
-           
             local_optimizer.zero_grad()
             predictions = local_model(batch_inputs) 
             loss = criterion(predictions, batch_targets)
