@@ -259,7 +259,7 @@ class FedSAM(FedMethod):
 
     
     def debug_output(self, model):
-        with torch.no_grad:
+        with torch.no_grad():
             params = [param.detach().flatten() for param in model.parameters() 
                                         if param is not None]
             if params:
@@ -270,13 +270,7 @@ class FedSAM(FedMethod):
                         local_models: List[SmallCNN], 
                         global_model: SmallCNN, 
                         **kwargs):
-        """
-        Execute one federated SAM round: average client gradients (weighted) and update server params.
-
-        Args:
-            local_models: list of SmallCNNs trained for one epoch.
-            global_model: the server model (nn.Module) whose parameters will be updated.
-        """
+       
 
         num_clients = len(local_models)
         verbose = kwargs['verbose']
@@ -286,7 +280,6 @@ class FedSAM(FedMethod):
         
         aggregation_weights = self.client_weights
 
-        print("Applying FedSAM on Server")
         if verbose:
             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
 
@@ -306,8 +299,8 @@ class FedSAM(FedMethod):
     def _train_client(self, 
                   local_model: SmallCNN, 
                   local_dataloader: DataLoader,
-                  device: torch.device, 
                   criterion: nn.CrossEntropyLoss,
+                  device: torch.device, 
                   **kwargs):
     
         local_model.to(device)
@@ -319,6 +312,7 @@ class FedSAM(FedMethod):
 
         total_samples_processed = 0.0
         total_loss_accumulated = 0.0
+        num_steps = 0
         
         local_optimizer = torch.optim.SGD(
             local_model.parameters(), 
@@ -327,9 +321,10 @@ class FedSAM(FedMethod):
             weight_decay=weight_decay
         )
 
-        for batch_index, data_batch in enumerate(local_dataloader):
-            if batch_index == self.K:
+        for data_batch in local_dataloader:
+            if num_steps == self.K:
                 break
+            num_steps +=1
             
             batch_inputs, batch_targets = data_batch
             batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
@@ -396,10 +391,10 @@ class FedSAM(FedMethod):
         test_loader = kwargs['test_loader']
 
         server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
-        central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
+        # central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
 
         print(f"FedSAM  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
-        print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
+        # print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
 
     def evaluate_server(self, server: SmallCNN, central: SmallCNN, **kwargs):
         self.evaluate_round(server, central, **kwargs)
@@ -417,7 +412,7 @@ class FedGH(FedMethod):
 
     
     def debug_output(self, model):
-        with torch.no_grad:
+        with torch.no_grad():
             params = [param.detach().flatten() for param in model.parameters() 
                                         if param is not None]
             if params:
