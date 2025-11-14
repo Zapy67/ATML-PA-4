@@ -46,7 +46,7 @@ from typing import List
 from copy import deepcopy
 
 class Federation:
-    def __init__(self, num_clients: int, federate_method: FedMethod, partition: str, domains: List[int], alpha: float, device, batch_size=32, pin_memory=False, num_workers=0):
+    def __init__(self, num_clients: int, federate_method: FedMethod, partition: str, domains: List[int], alpha: float = None, device = None, batch_size=32, pin_memory=False, num_workers=0):
         
         self.clients = [SmallCNN().to(device) for _ in range(num_clients)]
         self.server = SmallCNN().to(device)
@@ -57,6 +57,8 @@ class Federation:
         if partition == "iid":
             self.client_dataloaders = get_homogenous_domains(trainloader, num_clients, domains)
         elif partition == "dirichlet":
+            if alpha is None:
+                raise ValueError("Alpha cannot be none if heterogenous domains are required.")
             self.client_dataloaders = get_heterogenous_domains(
                 trainloader, num_clients, min_require_size=20, alpha=alpha
             )
@@ -67,6 +69,9 @@ class Federation:
         self.centralized_train_loader = deepcopy(trainloader)
 
         self.federated_method = federate_method
+
+    def set_method(self, method: FedMethod):
+        self.federated_method = method
 
     def train(self, rounds: int, lr = 0.01, verbose=False, **kwargs):
         criterion = nn.CrossEntropyLoss()
