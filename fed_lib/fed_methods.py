@@ -285,10 +285,11 @@ class FedSAM(FedMethod):
 
         with torch.no_grad():
             
-            param_groups = zip(*[list(local_model.parameters()) for local_model in local_models])
+            client_weights = [[agg_weight*param for param in list(local_model.parameters())] for local_model, agg_weight in zip(local_models, aggregation_weights)]
+            param_groups = zip(*client_weights)
             
-            aggregated_params = [agg_weight * torch.mean(torch.stack(param_group), dim=0) 
-                                for param_group, agg_weight in zip(param_groups, aggregation_weights)]
+            aggregated_params = [torch.sum(torch.stack(param_group), dim=0) 
+                                for param_group in param_groups]
             
             for aggregated_param, global_param in zip(aggregated_params, global_model.parameters()):
                 global_param.data = aggregated_param
@@ -340,8 +341,13 @@ class FedSAM(FedMethod):
             
             calculate_gradients_closure()
             
+            norm = 0
             for model_param in local_model.parameters():
-                model_param.data += self.rho * model_param.grad / torch.norm(model_param.grad)
+                grad = model_param.grad
+                norm += torch.sum(grad*grad)
+
+            for model_param in local_model.parameters():
+                model_param.data += self.rho * model_param.grad / torch.sqrt(model_param.grad)
             
             loss = calculate_gradients_closure()
             
