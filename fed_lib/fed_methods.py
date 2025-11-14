@@ -346,13 +346,13 @@ class FedSAM(FedMethod):
             for model_param in local_model.parameters():
                 model_param.data += self.rho * model_param.grad / torch.norm(model_param.grad)
             
-            calculate_gradients_closure()
+            loss = calculate_gradients_closure()
             
             local_model.load_state_dict(original_model_state)
             
             local_optimizer.step()
 
-            total_loss_accumulated += local_optimizer.step(calculate_gradients_closure).item()
+            total_loss_accumulated += loss.item()
             total_samples_processed += batch_inputs.size(0)
         
         if total_samples_processed == 0:

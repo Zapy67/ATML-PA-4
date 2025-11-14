@@ -585,21 +585,54 @@ def compare_model_parameters(model1: nn.Module, model2: nn.Module,
 
 #client drift
 def calculate_client_drift_metrics(global_model: nn.Module, 
-                                   local_models: List[nn.Module]) -> Dict[str, float]:
+                                   local_models: List[nn.Module], show_top_k: int = 5, verbose:bool = True) -> Dict[str, float]:
     
     per_client_drifts = []
     for local_model in local_models:
-        squared_l2_distance = 0.0
-        
-        for global_param, local_param in zip(global_model.parameters(), local_model.parameters()):
-            param_diff = global_param - local_param
-            squared_l2_distance += (param_diff).square().sum()
-            
-        per_client_drifts.append(squared_l2_distance.sqrt_().item())
+        l2_norm = compute_model_difference(local_model, global_model)
+        per_client_drifts.append(l2_norm)
 
     drift_summary = {
         'mean_client_drift': np.mean(per_client_drifts),
         'per_client_drifts': per_client_drifts
     }
+     
+    if verbose:  
+        print(f"\n{'='*70}")
+        print(f"Client Drift Stats:")
+   
+        print(f"{'='*70}")
+        print(f"Client Drift Mean: {np.mean(per_client_drifts):.6e}")
+        print(f"Client Drift Std: {np.std(per_client_drifts):.6e}")
+        top_k_clients = np.arange(len(local_models)).sort(order=per_client_drifts)[:top_k_clients]
+
+        print(f"Top {show_top_k} Clients with Greatest Drift")
+        for idx in top_k_clients:
+            print(f"Client Number: {idx:.6e} Drift :{per_client_drifts[idx]:6e}")
+            
+        print(f"{'='*70}\n")
 
     return drift_summary
+
+
+def calculate_label_skew(dataset: Dataset):
+    if dataset.targets is not None:
+        all_labels = dataset.targets
+    else:
+        data_loader = DataLoader(dataset, batch_size=64)
+        label_batches = []  
+        for _, batch_labels in data_loader: 
+            label_batches.append(batch_labels)
+
+        all_labels = torch.cat(label_batches, dim=0)
+        
+    label_distribution = np.bincount(all_labels) / len(all_labels)
+    label_entropy = -np.sum(label_distribution * np.log(label_distribution)) 
+    num_classes = len(np.unique(all_labels))
+
+    print(f"Entropy of Label Distribution (P(Y)): {label_entropy}")
+    print(f"Normalized Entropy of Label Distribution (P(Y)): {label_entropy / np.log(num_classes)}")
+    return label_entropy
+
+
+
