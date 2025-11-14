@@ -337,21 +337,21 @@ class FedSAM(FedMethod):
                 loss.backward()
                 return loss
             
-            original_model_state = local_model.state_dict()
+            # original_model_state = local_model.state_dict()
             
-            calculate_gradients_closure()
+            # calculate_gradients_closure()
             
-            norm = 0
-            for model_param in local_model.parameters():
-                grad = model_param.grad
-                norm += torch.sum(grad*grad)
+            # norm = 0
+            # for model_param in local_model.parameters():
+            #     grad = model_param.grad
+            #     norm += torch.sum(grad*grad)
 
-            for model_param in local_model.parameters():
-                model_param.data += self.rho * model_param.grad / torch.sqrt(model_param.grad)
+            # for model_param in local_model.parameters():
+            #     model_param.data += self.rho * model_param.grad / torch.sqrt(model_param.grad)
             
             loss = calculate_gradients_closure()
             
-            local_model.load_state_dict(original_model_state)
+            # local_model.load_state_dict(original_model_state)
             
             local_optimizer.step()
 
