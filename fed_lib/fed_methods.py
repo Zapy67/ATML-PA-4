@@ -379,7 +379,7 @@ class FedSAM(FedMethod):
             print(f"Training Client {i+1}/{len(clients)}")
 
             client.load_state_dict(server.state_dict())
-            n_samples, avg_loss = self._train_client(client, loader, criterion, device)
+            n_samples, avg_loss = self._train_client(client, loader, criterion, device, **kwargs)
 
             client_sizes.append(n_samples)
             client_losses.append(avg_loss)
