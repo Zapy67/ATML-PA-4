@@ -291,8 +291,11 @@ class FedSAM(FedMethod):
             aggregated_params = [torch.sum(torch.stack(param_group), dim=0) 
                                 for param_group in param_groups]
             
+            if len(local_models == 1):
+                aggregated_params = list(local_models[0].parameters())
+            
             for aggregated_param, global_param in zip(aggregated_params, global_model.parameters()):
-                global_param.data = aggregated_param
+                global_param.data = aggregated_param.data
                 
         if verbose:
             self.debug_output(global_model)
