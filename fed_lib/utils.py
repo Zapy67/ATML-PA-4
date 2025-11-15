@@ -70,6 +70,7 @@ class SmallConvBlock(nn.Module):
             nn.BatchNorm2d(out_channels),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels),
             nn.MaxPool2d(2, 2),
             nn.Dropout(0.25),
         )
@@ -81,17 +82,7 @@ class SmallConvBlock(nn.Module):
         return f"{self.__class__.__name__}(in_channels={self.block[0].in_channels}, out_channels={self.block[0].out_channels})"
 
 class SmallCNN(nn.Module):
-    """
-    Small CNN for CIFAR-10.
-
-    Architecture:
-        - SmallConvBlock(3 -> 32)
-        - SmallConvBlock(32 -> 64)
-        - Flatten -> Linear(64 -> num_classes)
-
-    Args:
-        num_classes (int): number of output classes (default 10).
-    """
+   
     def __init__(self, num_classes=10):
         super().__init__()
 
