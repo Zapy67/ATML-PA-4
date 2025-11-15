@@ -388,7 +388,7 @@ class FedSAM(FedMethod):
             print(f"Training Client {i+1}/{len(clients)}")
 
             params = copy.deepcopy(server.state_dict())
-            client = SmallCNN().load_state_dict(params)
+            client.load_state_dict(params)
             n_samples, avg_loss = self._train_client(client, loader, criterion, device, lr=lr, momentum=momentum, weight_decay=weight_decay)
 
             client_sizes.append(n_samples)
