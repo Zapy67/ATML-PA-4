@@ -90,11 +90,11 @@ class SmallCNN(nn.Module):
             SmallConvBlock(3, 32),
             SmallConvBlock(32, 64),
             SmallConvBlock(64, 128),
-            nn.AdaptiveAvgPool2d(1),
         )
 
         self.task_head = nn.Sequential(
             nn.Flatten(),
+            nn.Linear(128*4*4, 128),   
             nn.Linear(128, num_classes)
         )
 
