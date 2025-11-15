@@ -307,9 +307,9 @@ class FedSAM(FedMethod):
         local_model.to(device)
         local_model.train()
 
-        learning_rate = kwargs.get('lr', 0.5 * self.rho)
-        momentum = kwargs.get('momentum', 0)
-        weight_decay = kwargs.get('weight_decay', 0)
+        learning_rate = kwargs['lr']
+        momentum = kwargs['momentum']
+        weight_decay = kwargs['weight_decay']
 
         total_samples_processed = 0.0
         total_loss_accumulated = 0.0
