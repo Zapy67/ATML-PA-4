@@ -284,22 +284,23 @@ class FedSAM(FedMethod):
         if verbose:
             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
 
+     
         with torch.no_grad():
-            client_weights = []
+            keys = global_model.state_dict().keys()
+            client_weights_list = []
+
             for agg_weight, local_model in zip(aggregation_weights, local_models):
-                print(agg_weight)
-                print(local_model)
-                params = list(local_model.parameters())
-                client_weights.append([param*agg_weight for param in params])
+                local_params = list(local_model.state_dict().values())
+                client_weights_list.append([param * agg_weight for param in local_params])
+
             
-            
-            aggregated_params = [sum(param_group) for param_group in zip(*client_weights)]
+            aggregated_params = [sum(param_group) for param_group in zip(*client_weights_list)]
+
+            global_state_dict = global_model.state_dict()
+            for key, aggregated_tensor in zip(keys, aggregated_params):
+                global_state_dict[key].copy_(aggregated_tensor)
+
                
-            for aggregated_param, global_param in zip(aggregated_params, global_model.parameters()):
-                global_param.copy_(aggregated_param)
-    
-            
-                
         if verbose:
             self.debug_output(global_model)
 
@@ -387,7 +388,8 @@ class FedSAM(FedMethod):
         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
             print(f"Training Client {i+1}/{len(clients)}")
 
-            client = copy.deepcopy(server)
+            params = copy.deepcopy(server.state_dict())
+            client = client.load_state_dict(params)
             n_samples, avg_loss = self._train_client(client, loader, criterion, device, lr=lr, momentum=momentum, weight_decay=weight_decay)
 
             client_sizes.append(n_samples)
