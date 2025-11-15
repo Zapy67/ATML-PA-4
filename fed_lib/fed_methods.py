@@ -364,6 +364,8 @@ class FedSAM(FedMethod):
         if total_samples_processed == 0:
             return 0, 0.0
         
+        print(evaluate_model_on_test(local_model, local_dataloader, criterion, device))
+        
         average_loss = total_loss_accumulated / total_samples_processed
 
         return total_samples_processed, average_loss
