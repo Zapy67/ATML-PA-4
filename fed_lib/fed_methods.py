@@ -291,7 +291,7 @@ class FedSAM(FedMethod):
             aggregated_params = [torch.sum(torch.stack(param_group), dim=0) 
                                 for param_group in param_groups]
             
-            if len(len(local_models) == 1):
+            if num_clients == 1:
                 aggregated_params = list(local_models[0].parameters())
             
             for aggregated_param, global_param in zip(aggregated_params, global_model.parameters()):
