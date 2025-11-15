@@ -285,17 +285,17 @@ class FedSAM(FedMethod):
 
         with torch.no_grad():
             
-            client_weights = [[agg_weight*param for param in list(local_model.parameters())] for local_model, agg_weight in zip(local_models, aggregation_weights)]
-            param_groups = zip(*client_weights)
+            client_weights = []
+            for agg_weight, local_model in zip(aggregation_weights, local_models):
+                params = list(local_model.parameters())
+                client_weights.append([param*agg_weight for param in params])
             
-            aggregated_params = [torch.sum(torch.stack(param_group), dim=0) 
-                                for param_group in param_groups]
             
-            if num_clients == 1:
-                aggregated_params = list(local_models[0].parameters())
-            
+            aggregated_params = [sum(param_group) for param_group in zip(*client_weights)]
+               
             for aggregated_param, global_param in zip(aggregated_params, global_model.parameters()):
-                global_param.data = aggregated_param.data
+                global_param.copy_(aggregated_param)
+            
                 
         if verbose:
             self.debug_output(global_model)
