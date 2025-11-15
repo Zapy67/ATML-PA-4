@@ -284,9 +284,10 @@ class FedSAM(FedMethod):
             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
 
         with torch.no_grad():
-            
             client_weights = []
             for agg_weight, local_model in zip(aggregation_weights, local_models):
+                print(agg_weight)
+                print(local_model)
                 params = list(local_model.parameters())
                 client_weights.append([param*agg_weight for param in params])
             
@@ -296,6 +297,9 @@ class FedSAM(FedMethod):
             for aggregated_param, global_param in zip(aggregated_params, global_model.parameters()):
                 global_param.copy_(aggregated_param)
             
+            import utils
+            utils.compare_model_parameters(global_model, local_models[0])
+
                 
         if verbose:
             self.debug_output(global_model)
@@ -363,8 +367,7 @@ class FedSAM(FedMethod):
         
         if total_samples_processed == 0:
             return 0, 0.0
-        
-        
+         
         average_loss = total_loss_accumulated / total_samples_processed
 
         return total_samples_processed, average_loss
