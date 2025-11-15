@@ -296,10 +296,8 @@ class FedSAM(FedMethod):
                
             for aggregated_param, global_param in zip(aggregated_params, global_model.parameters()):
                 global_param.copy_(aggregated_param)
+    
             
-            import utils
-            utils.compare_model_parameters(global_model, local_models[0])
-
                 
         if verbose:
             self.debug_output(global_model)
