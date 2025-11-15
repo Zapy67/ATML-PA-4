@@ -250,10 +250,10 @@ class FedSAM(FedMethod):
     def __init__(self, 
              sam_rho: float, 
              num_local_steps: int, 
-             client_aggregation_weights: Optional[Sequence[float]] = None):
+             client_aggregation_weights: list[float]):
     
         super().__init__()
-        self.client_weights = None if client_aggregation_weights is None else list(client_aggregation_weights)
+        self.client_weights =  client_aggregation_weights 
         self.rho = sam_rho
         self.K = num_local_steps
 
@@ -364,7 +364,6 @@ class FedSAM(FedMethod):
         if total_samples_processed == 0:
             return 0, 0.0
         
-        print(evaluate_model_on_test(local_model, local_dataloader, criterion, device))
         
         average_loss = total_loss_accumulated / total_samples_processed
 
@@ -400,7 +399,7 @@ class FedSAM(FedMethod):
 
 
     def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(reduction='sum')
         device = kwargs['device']
         test_loader = kwargs['test_loader']
 
