@@ -369,6 +369,9 @@ class FedSAM(FedMethod):
 
         device = kwargs['device']
         verbose = kwargs['verbose']
+        lr = kwargs['lr']
+        momentum = kwargs['momentum']
+        weight_decay = kwargs['weight_decay']
 
         criterion = nn.CrossEntropyLoss(reduction='sum')
 
@@ -379,7 +382,7 @@ class FedSAM(FedMethod):
             print(f"Training Client {i+1}/{len(clients)}")
 
             client.load_state_dict(server.state_dict())
-            n_samples, avg_loss = self._train_client(client, loader, criterion, device, **kwargs)
+            n_samples, avg_loss = self._train_client(client, loader, criterion, device, lr=lr, momentum=momentum, weight_decay=weight_decay)
 
             client_sizes.append(n_samples)
             client_losses.append(avg_loss)
