@@ -299,7 +299,6 @@ class FedSAM(FedMethod):
             global_state_dict = global_model.state_dict()
             for key, aggregated_tensor in zip(keys, aggregated_params):
                 global_state_dict[key].copy_(aggregated_tensor)
-
                
         if verbose:
             self.debug_output(global_model)
@@ -389,7 +388,7 @@ class FedSAM(FedMethod):
             print(f"Training Client {i+1}/{len(clients)}")
 
             params = copy.deepcopy(server.state_dict())
-            client = client.load_state_dict(params)
+            client = SmallCNN().load_state_dict(params)
             n_samples, avg_loss = self._train_client(client, loader, criterion, device, lr=lr, momentum=momentum, weight_decay=weight_decay)
 
             client_sizes.append(n_samples)
