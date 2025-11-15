@@ -98,7 +98,8 @@ class SmallCNN(nn.Module):
         self.backbone = nn.Sequential(
             SmallConvBlock(3, 32),
             SmallConvBlock(32, 64),
-            nn.Conv2d(64, 2, kernel_size=1, stride=1),     
+            SmallConvBlock(64, 128),
+            nn.AdaptiveAvgPool2d(1),
         )
 
         self.task_head = nn.Sequential(
