@@ -51,6 +51,7 @@ from fed_lib.utils import (
 )
 import random
 import numpy as np
+import copy
 
 class FedMethod:
     """
@@ -386,7 +387,7 @@ class FedSAM(FedMethod):
         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
             print(f"Training Client {i+1}/{len(clients)}")
 
-            client.load_state_dict(server.state_dict())
+            client = copy.deepcopy(server)
             n_samples, avg_loss = self._train_client(client, loader, criterion, device, lr=lr, momentum=momentum, weight_decay=weight_decay)
 
             client_sizes.append(n_samples)
