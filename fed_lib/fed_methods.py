@@ -343,21 +343,23 @@ class FedSAM(FedMethod):
                 loss.backward()
                 return loss
             
-            # original_model_state = local_model.state_dict()
+            original_model_state = copy.deepcopy(local_model.state_dict())
             
-            # calculate_gradients_closure()
+            calculate_gradients_closure()
             
-            # norm = 0
-            # for model_param in local_model.parameters():
-            #     grad = model_param.grad
-            #     norm += torch.sum(grad*grad)
+            norm = 0
+            for model_param in local_model.parameters():
+                if model_param.grad is not None:
+                    grad = model_param.grad
+                    norm += torch.sum(grad*grad + 1e-12)
 
-            # for model_param in local_model.parameters():
-            #     model_param.data += self.rho * model_param.grad / torch.sqrt(model_param.grad)
+            for model_param in local_model.parameters():
+                scale = self.rho/torch.sqrt(norm)
+                model_param.data += scale * model_param.grad  
             
             loss = calculate_gradients_closure()
             
-            # local_model.load_state_dict(original_model_state)
+            local_model.load_state_dict(original_model_state)
             
             local_optimizer.step()
 
@@ -385,7 +387,7 @@ class FedSAM(FedMethod):
         client_losses = []
 
         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
-            print(f"Training Client {i+1}/{len(clients)}")
+            # print(f"Training Client {i+1}/{len(clients)}")
 
             params = copy.deepcopy(server.state_dict())
             client.load_state_dict(params)
