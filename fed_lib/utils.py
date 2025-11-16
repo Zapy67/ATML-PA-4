@@ -243,6 +243,48 @@ def evaluate_model_on_test(model: SmallCNN, test_loader: DataLoader, criterion: 
 
     return avg_loss, accuracy
 
+def evaluate_model_on_clients(model: SmallCNN, loaders: List[DataLoader], criterion: nn.CrossEntropyLoss, device: torch.device):
+    """
+    Evaluate model on the test datasets.
+    """
+
+    model.eval()
+    model.to(device)
+
+    client_metrics = []
+
+    with torch.inference_mode():
+        for test_loader in loaders:
+            running_loss = 0.0
+            running_correct = 0
+            running_total = 0
+
+            pbar = tqdm.tqdm(test_loader, desc="Test ", leave=False)
+            for batch in pbar:
+                inputs, targets = batch
+                inputs: torch.Tensor = inputs.to(device, non_blocking=True)
+                targets: torch.Tensor = targets.to(device, non_blocking=True)
+
+                outputs: torch.Tensor = model(inputs)
+                loss: torch.Tensor = criterion(outputs, targets)
+
+                running_loss += loss.item() * inputs.size(0)
+                _, preds = torch.max(outputs, dim=1)
+                running_correct += (preds == targets).sum().item()
+                running_total += inputs.size(0)
+
+                avg_loss = running_loss / running_total
+                avg_acc = running_correct / running_total
+                pbar.set_postfix({'loss': f"{avg_loss:.4f}", 'acc': f"{avg_acc:.4f}"})
+
+            avg_loss = running_loss / running_total if running_total > 0 else 0.0
+            accuracy = running_correct / running_total if running_total > 0 else 0.0
+
+            client_metrics.append({"avg_loss": avg_loss, "accuracy": accuracy})
+
+
+    return client_metrics
+
 ### Dataset
 
 def get_cifar10(root='./data', train_transform=None, test_transform=None, batch_size=32, pin_memory=False, num_workers=0):
