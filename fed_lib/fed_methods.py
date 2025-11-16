@@ -660,55 +660,106 @@ class FedGH(FedMethod):
                 param_vector = torch.cat(params)
                 print(f"Aggregated server grad_norm: {torch.norm(param_vector).item():.4f}")
     
-    def exec_server_round(self, 
-                          local_models: List[nn.Module], 
-                          global_model: nn.Module, 
+    def exec_server_round(self,
+                          local_models: List[nn.Module],
+                          global_model: nn.Module,
                           **kwargs):
-       
+        
+        
         num_clients = len(local_models)
         verbose = kwargs.get('verbose', False) # Safe get
-    
+
         if num_clients == 0:
             raise ValueError("local_models must contain at least one model.")
         
         aggregation_weights = self.client_weights
         if verbose:
             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
-        def harmonize_gradients(grads_list):           
-            harmonized_grads = []
-            for i, g_i in enumerate(grads_list):
-                for j, g_j in enumerate(harmonized_grads):
+
+      
+        def harmonize_gradients(grads_list: List[torch.Tensor]) -> List[torch.Tensor]:
+           
+            harmonized_list = [g.clone().detach() for g in grads_list]
+            
+            # Iterate over all unique unordered pairs (i, j) where i < j
+            for i in range(num_clients):
+                for j in range(i + 1, num_clients):
+                    
+                    # Get the *current* state of the gradients from the list
+                    g_i = harmonized_list[i]
+                    g_j = harmonized_list[j]
+                    
                     dot = torch.dot(g_i, g_j)
+                    
+                    
                     if dot < 0:
-                        norm_sq = torch.dot(g_j, g_j)
-                        if norm_sq > 0:
-                            g_i -= (dot / norm_sq) * g_j
-                harmonized_grads.append(g_i)
-            return harmonized_grads
-       
+                        # Get the norms of the *current* vectors (they might
+                        # have been modified by a previous harmonization step).
+                        norm_i_sq = torch.dot(g_i, g_i)
+                        norm_j_sq = torch.dot(g_j, g_j)
+
+                        # --- Symmetric Projection (as per Task 4.3) ---
+                        
+                        # 1. Calculate g_i' = g_i - (dot / ||g_j||^2) * g_j
+                        # (Project g_i onto the orthogonal complement of g_j)
+                        if norm_j_sq > 1e-12: # Epsilon for float safety
+                            proj_i_on_j = (dot / norm_j_sq) * g_j
+                            harmonized_list[i] = g_i - proj_i_on_j # Update list
+                        
+                        # 2. Calculate g_j' = g_j - (dot / ||g_i||^2) * g_i
+                        # (Project g_j onto the orthogonal complement of g_i)
+                        if norm_i_sq > 1e-12:
+                            proj_j_on_i = (dot / norm_i_sq) * g_i
+                            harmonized_list[j] = g_j - proj_j_on_i # Update list
+
+            return harmonized_list
+        # --- End of Corrected Nested Function ---
+        
         with torch.no_grad():
+            # 1. Flatten global model
             global_params_flat = torch.cat([p.flatten() for p in global_model.parameters()])
             client_updates = []
             
+            # 2. Calculate client updates (deltas)
             for local_model in local_models:
                 local_params_flat = torch.cat([p.flatten() for p in local_model.parameters()])
                 update = local_params_flat - global_params_flat
                 client_updates.append(update)
+            
+            # 3. Harmonize the updates
             harmonized_updates = harmonize_gradients(client_updates)
+            
+            # 4. Aggregate the harmonized updates
             weighted_updates = torch.zeros_like(global_params_flat)
             for agg_weight, h_update in zip(aggregation_weights, harmonized_updates):
                 weighted_updates += h_update * agg_weight
+            
+            # 5. Apply aggregated update to global model
             new_global_params = global_params_flat + weighted_updates
+            
+            # 6. Un-flatten and load new parameters into the global model
             start_idx = 0
             global_state_dict = global_model.state_dict()
             for key, param in global_state_dict.items():
-                length = param.numel()
-                new_tensor = new_global_params[start_idx:start_idx+length].view(param.shape)
-                global_state_dict[key].copy_(new_tensor)
-                start_idx += length
-               
+                # Ensure we only process parameters that are part of the flattened tensor
+                if param.requires_grad:
+                    length = param.numel()
+                    
+                    # Boundary check
+                    if start_idx + length > new_global_params.numel():
+                        raise ValueError(f"Shape mismatch during un-flattening. Key: {key}")
+                        
+                    new_tensor_slice = new_global_params[start_idx : start_idx + length]
+                    
+                  
+                    if new_tensor_slice.numel() > 0:
+                        global_state_dict[key].copy_(new_tensor_slice.view(param.shape))
+                    
+                    start_idx += length
+                
         if verbose:
-            self.debug_output(global_model)
+            print("Aggregation complete.")
+        
     
     def _train_client(self, 
                   local_model: nn.Module, 
