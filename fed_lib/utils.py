@@ -602,8 +602,7 @@ def calculate_client_drift_metrics(global_model: nn.Module,
         print(f"{'='*70}")
         print(f"Client Drift Mean: {np.mean(per_client_drifts):.6e}")
         print(f"Client Drift Std: {np.std(per_client_drifts):.6e}")
-        top_k_clients = np.arange(len(local_models)).sort(order=per_client_drifts)[:top_k_clients]
-
+        top_k_clients = np.argsort(per_client_drifts)[:show_top_k]
         print(f"Top {show_top_k} Clients with Greatest Drift")
         for idx in top_k_clients:
             print(f"Client Number: {idx:.6e} Drift :{per_client_drifts[idx]:6e}")
