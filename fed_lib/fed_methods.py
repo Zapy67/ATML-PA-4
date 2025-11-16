@@ -442,6 +442,198 @@ class FedSAM(FedMethod):
     def evaluate_server(self, server: SmallCNN, central: SmallCNN, **kwargs):
         self.evaluate_round(server, central, **kwargs)
 
+# class FedGH(FedMethod):
+#     def __init__(self, 
+#                  num_local_steps: int, 
+#                  client_aggregation_weights: list[float]):
+    
+#         super().__init__()
+#         self.client_weights = client_aggregation_weights 
+#         self.K = num_local_steps
+
+#         # Track metrics
+#         self.round_metrics = {
+#             'fed_test_acc': [],
+#             'fed_test_loss': [],
+#             'central_test_acc': [],
+#             'central_test_loss': [],
+#             'client_drift': [],
+#             'param_difference': []
+#         }
+
+#     def debug_output(self, model):
+#         with torch.no_grad():
+#             params = [param.detach().flatten() for param in model.parameters() 
+#                                             if param is not None]
+#             if params:
+#                 param_vector = torch.cat(params)
+#                 print(f"Aggregated server grad_norm: {torch.norm(param_vector).item():.4f}")
+    
+#     def exec_server_round(self, 
+#                           local_models: List[nn.Module], 
+#                           global_model: nn.Module, 
+#                           **kwargs):
+       
+#         num_clients = len(local_models)
+#         verbose = kwargs.get('verbose', False) # Safe get
+    
+#         if num_clients == 0:
+#             raise ValueError("local_models must contain at least one model.")
+        
+#         aggregation_weights = self.client_weights
+
+#         if verbose:
+#             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
+
+#         def harmonize_gradients(grads_list):           
+#             harmonized_grads = []
+#             for i, g_i in enumerate(grads_list):
+#                 for j, g_j in enumerate(harmonized_grads):
+#                     dot = torch.dot(g_i, g_j)
+#                     if dot < 0:
+#                         norm_sq = torch.dot(g_j, g_j)
+#                         if norm_sq > 0:
+#                             g_i -= (dot / norm_sq) * g_j
+#                 harmonized_grads.append(g_i)
+#             return harmonized_grads
+       
+#         with torch.no_grad():
+#             global_params_flat = torch.cat([p.flatten() for p in global_model.parameters()])
+#             client_updates = []
+            
+#             for local_model in local_models:
+#                 local_params_flat = torch.cat([p.flatten() for p in local_model.parameters()])
+#                 update = local_params_flat - global_params_flat
+#                 client_updates.append(update)
+
+#             harmonized_updates = harmonize_gradients(client_updates)
+
+#             weighted_updates = torch.zeros_like(global_params_flat)
+#             for agg_weight, h_update in zip(aggregation_weights, harmonized_updates):
+#                 weighted_updates += h_update * agg_weight
+
+#             new_global_params = global_params_flat + weighted_updates
+
+#             start_idx = 0
+#             global_state_dict = global_model.state_dict()
+#             for key, param in global_state_dict.items():
+#                 length = param.numel()
+#                 new_tensor = new_global_params[start_idx:start_idx+length].view(param.shape)
+#                 global_state_dict[key].copy_(new_tensor)
+#                 start_idx += length
+               
+#         if verbose:
+#             self.debug_output(global_model)
+
+#     def _train_client(self, 
+#                   local_model: nn.Module, 
+#                   local_dataloader: DataLoader,
+#                   criterion: nn.CrossEntropyLoss,
+#                   device: torch.device, 
+#                   **kwargs):
+    
+#         local_model.to(device)
+#         local_model.train()
+
+#         learning_rate = kwargs['lr']
+#         momentum = kwargs['momentum']
+#         weight_decay = kwargs['weight_decay']
+
+#         total_samples_processed = 0.0
+#         total_loss_accumulated = 0.0
+#         num_steps = 0
+#         counter = 0
+#         batch_steps = max(1, int(len(local_dataloader)/ self.K))
+#         leftover = len(local_dataloader) - batch_steps * self.K
+#         curr_samples = 0.0
+        
+#         local_optimizer = torch.optim.SGD(
+#             local_model.parameters(), 
+#             lr=learning_rate, 
+#             momentum=momentum, 
+#             weight_decay=weight_decay
+#         )
+
+#         local_optimizer.zero_grad(set_to_none=True)
+
+#         for data_batch in local_dataloader:
+#             counter +=1
+            
+#             batch_inputs, batch_targets = data_batch
+#             batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
+#             predictions = local_model(batch_inputs) 
+#             loss = criterion(predictions, batch_targets)
+#             loss.backward()
+#             total_loss_accumulated += loss.item()
+#             total_samples_processed += batch_inputs.size(0)
+#             if counter == (batch_steps + (1 if num_steps < leftover else 0)):
+#                 local_optimizer.step()
+#                 local_optimizer.zero_grad(set_to_none=True)
+#                 counter = 0
+#                 num_steps += 1
+#                 if leftover > 0: leftover -= 1
+
+#         if num_steps < self.K:
+#             local_optimizer.step()
+#             local_optimizer.zero_grad(set_to_none=True)
+        
+#         if total_samples_processed == 0:
+#             return 0, 0.0
+         
+#         average_loss = total_loss_accumulated / total_samples_processed
+
+#         return total_samples_processed, average_loss
+
+#     def exec_client_round(self, server: nn.Module, clients: List[nn.Module], client_dataloaders: List[DataLoader], **kwargs):
+
+#         device = kwargs['device']
+#         verbose = kwargs['verbose']
+#         lr = kwargs['lr']
+#         momentum = kwargs['momentum']
+#         weight_decay = kwargs['weight_decay']
+
+#         criterion = nn.CrossEntropyLoss(reduction='sum')
+
+#         client_sizes = []
+#         client_losses = []
+
+#         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
+
+#             params = copy.deepcopy(server.state_dict())
+#             client.load_state_dict(params)
+#             n_samples, avg_loss = self._train_client(client, loader, criterion, device, lr=lr, momentum=momentum, weight_decay=weight_decay)
+
+#             client_sizes.append(n_samples)
+#             client_losses.append(avg_loss)
+
+#             if verbose:
+#                 self.debug_output(client)
+
+#         kwargs['client_losses'] = client_losses
+#         kwargs['client_sizes'] = client_sizes
+
+
+#     def evaluate_round(self, server: nn.Module, central: nn.Module, **kwargs):
+#         criterion = nn.CrossEntropyLoss(reduction='sum')
+#         device = kwargs['device']
+#         test_loader = kwargs['test_loader']
+
+#         server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
+        
+#         central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
+
+#         self.round_metrics['fed_test_acc'].append(server_acc)
+#         self.round_metrics['fed_test_loss'].append(server_loss)
+#         self.round_metrics['central_test_acc'].append(central_acc)
+#         self.round_metrics['central_test_loss'].append(central_loss)
+#         param_diff = compute_model_difference(server, central, norm_type='l2')
+#         self.round_metrics['param_difference'].append(param_diff)
+
+#         print(f"FedGH   | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
+#         print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
+        
+#     def evaluate_server(self, server: nn.Module, central: nn.Module, **kwargs):
+#         self.evaluate_round(server, central, **kwargs)
 class FedGH(FedMethod):
     def __init__(self, 
                  num_local_steps: int, 
@@ -482,44 +674,53 @@ class FedGH(FedMethod):
         
         aggregation_weights = self.client_weights
 
+        if len(aggregation_weights) != num_clients:
+            raise ValueError("Length of client_aggregation_weights must equal number of local models.")
+
         if verbose:
             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
 
-        def harmonize_gradients(grads_list):           
+        def harmonize_gradients(grads_list):
+            # operate on clones to avoid mutating inputs
             harmonized_grads = []
-            for i, g_i in enumerate(grads_list):
-                for j, g_j in enumerate(harmonized_grads):
+            for g in grads_list:
+                g_i = g.clone()
+                for g_j in harmonized_grads:
                     dot = torch.dot(g_i, g_j)
                     if dot < 0:
                         norm_sq = torch.dot(g_j, g_j)
                         if norm_sq > 0:
-                            g_i -= (dot / norm_sq) * g_j
+                            g_i = g_i - (dot / norm_sq) * g_j
                 harmonized_grads.append(g_i)
             return harmonized_grads
        
         with torch.no_grad():
-            global_params_flat = torch.cat([p.flatten() for p in global_model.parameters()])
+            # make device explicit
+            device = next(global_model.parameters()).device
+            global_params_list = list(global_model.parameters())
+            global_params_flat = torch.cat([p.detach().to(device).flatten() for p in global_params_list])
+
             client_updates = []
-            
             for local_model in local_models:
-                local_params_flat = torch.cat([p.flatten() for p in local_model.parameters()])
-                update = local_params_flat - global_params_flat
+                local_params_list = list(local_model.parameters())
+                local_params_flat = torch.cat([p.detach().to(device).flatten() for p in local_params_list])
+                update = (local_params_flat - global_params_flat).detach()
                 client_updates.append(update)
 
             harmonized_updates = harmonize_gradients(client_updates)
 
-            weighted_updates = torch.zeros_like(global_params_flat)
+            weighted_updates = torch.zeros_like(global_params_flat, device=device)
             for agg_weight, h_update in zip(aggregation_weights, harmonized_updates):
                 weighted_updates += h_update * agg_weight
 
             new_global_params = global_params_flat + weighted_updates
 
+            # write back: use named_parameters() to iterate in an ordered, writable way
             start_idx = 0
-            global_state_dict = global_model.state_dict()
-            for key, param in global_state_dict.items():
+            for (name, param) in global_model.named_parameters():
                 length = param.numel()
                 new_tensor = new_global_params[start_idx:start_idx+length].view(param.shape)
-                global_state_dict[key].copy_(new_tensor)
+                param.data.copy_(new_tensor.to(param.device))
                 start_idx += length
                
         if verbose:
@@ -543,10 +744,13 @@ class FedGH(FedMethod):
         total_loss_accumulated = 0.0
         num_steps = 0
         counter = 0
-        batch_steps = max(1, int(len(local_dataloader)/ self.K))
-        leftover = len(local_dataloader) - batch_steps * self.K
-        curr_samples = 0.0
-        
+
+        total_batches = len(local_dataloader)
+        # ensure K is at least 1
+        K = max(1, int(self.K))
+        batches_per_step = total_batches // K
+        leftover = total_batches % K
+
         local_optimizer = torch.optim.SGD(
             local_model.parameters(), 
             lr=learning_rate, 
@@ -556,27 +760,44 @@ class FedGH(FedMethod):
 
         local_optimizer.zero_grad(set_to_none=True)
 
-        for data_batch in local_dataloader:
-            counter +=1
-            
+        # We will do exactly K optimizer steps (some steps get one extra batch until leftover exhausted)
+        current_step = 0
+        processed_batches_in_step = 0
+        # set target for current step
+        target_batches_for_step = batches_per_step + (1 if current_step < leftover else 0)
+        if target_batches_for_step == 0:
+            # if there are fewer batches than K, ensure at least one batch per step until exhausted
+            target_batches_for_step = 1
+
+        for batch_idx, data_batch in enumerate(local_dataloader):
             batch_inputs, batch_targets = data_batch
             batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
             predictions = local_model(batch_inputs) 
             loss = criterion(predictions, batch_targets)
+            # accumulate gradients (criterion should be sum reduction if caller wants sums)
             loss.backward()
             total_loss_accumulated += loss.item()
             total_samples_processed += batch_inputs.size(0)
-            if counter == (batch_steps + (1 if num_steps < leftover else 0)):
+
+            processed_batches_in_step += 1
+            if processed_batches_in_step >= target_batches_for_step:
+                # perform optimizer step for this chunk
                 local_optimizer.step()
                 local_optimizer.zero_grad(set_to_none=True)
-                counter = 0
                 num_steps += 1
-                if leftover > 0: leftover -= 1
+                current_step += 1
+                processed_batches_in_step = 0
+                target_batches_for_step = batches_per_step + (1 if current_step < leftover else 0)
+                if target_batches_for_step == 0 and current_step < K:
+                    # still need to reach K steps but no batches remain - break
+                    target_batches_for_step = 0
 
-        if num_steps < self.K:
+        # If for some reason we haven't reached K steps but there are leftover gradients, step once more.
+        if num_steps < K and any(p.grad is not None and p.grad.abs().sum().item() != 0 for p in local_model.parameters()):
             local_optimizer.step()
             local_optimizer.zero_grad(set_to_none=True)
-        
+            num_steps += 1
+
         if total_samples_processed == 0:
             return 0, 0.0
          
@@ -587,7 +808,7 @@ class FedGH(FedMethod):
     def exec_client_round(self, server: nn.Module, clients: List[nn.Module], client_dataloaders: List[DataLoader], **kwargs):
 
         device = kwargs['device']
-        verbose = kwargs['verbose']
+        verbose = kwargs.get('verbose', False)
         lr = kwargs['lr']
         momentum = kwargs['momentum']
         weight_decay = kwargs['weight_decay']
