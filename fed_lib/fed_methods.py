@@ -47,12 +47,13 @@ from fed_lib.utils import (
     SmallCNN,
     train_model_one_epoch,
     evaluate_model_on_test,
-    compute_model_difference
+    compute_model_difference,
+    calculate_client_drift_metrics,
 )
 import random
 import numpy as np
 import copy
-import utils
+
 
 class FedMethod:
     """
@@ -285,7 +286,7 @@ class FedSAM(FedMethod):
         if verbose:
             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
         
-        utils.calculate_client_drift_metrics(global_model, local_models, show_top_k=5, verbose=True)
+        calculate_client_drift_metrics(global_model, local_models, show_top_k=5, verbose=True)
      
         with torch.no_grad():
             keys = global_model.state_dict().keys()
