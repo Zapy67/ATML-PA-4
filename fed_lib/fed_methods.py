@@ -141,7 +141,7 @@ class FedSGD(FedMethod):
             print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
 
         # server_optimizer.zero_grad(set_to_none=True)
-        agg_state_dict = server.state_dict()
+        agg_state_dict = copy.deepcopy(server.state_dict())
         for key in agg_state_dict.keys():
             agg_state_dict[key].zero_()
 
@@ -198,7 +198,7 @@ class FedSGD(FedMethod):
 
         device = kwargs['device']
         verbose = kwargs['verbose']
-        lr = kwargs.get('lr', 0.01)
+        lr = kwargs.get('lr', 1e-3)
 
         criterion = nn.CrossEntropyLoss()
 
