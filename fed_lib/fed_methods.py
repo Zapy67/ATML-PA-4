@@ -738,12 +738,19 @@ class FedAvg(FedMethod):
 
             outputs = client(inputs)
             loss = criterion(outputs, targets)
-            loss.backward()
+            batch_size = inputs.size(0)
+            scaled_loss = loss * batch_size
+            scaled_loss.backward()
 
             curr_samples += inputs.size(0)
             total_samples += inputs.size(0)
 
             if counter == (batch_steps + (1 if num_steps < leftover else 0)):
+                with torch.no_grad():
+                    for p in client.parameters():
+                        if p.grad is not None:
+                            p.grad.div_(curr_samples)
+                curr_samples = 0
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
                 counter = 0
@@ -751,6 +758,10 @@ class FedAvg(FedMethod):
                 if leftover > 0: leftover -= 1
 
         if num_steps < self.local_epochs:
+            with torch.no_grad():
+                for p in client.parameters():
+                    if p.grad is not None:
+                        p.grad.div_(curr_samples)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
@@ -782,7 +793,7 @@ class FedAvg(FedMethod):
             client = clients[idx]
             loader = client_dataloaders[idx]
             print(f"Training Client {idx+1}/{n_clients} for {self.local_epochs} epochs")
-            client.load_state_dict(server.state_dict())
+            client.load_state_dict(copy.deepcopy(server.state_dict()))
             n_samples = self._train_client_local(client, loader, criterion, lr, device)
             client_sizes.append(n_samples)
             if verbose:
