@@ -343,26 +343,50 @@ class FedSAM(FedMethod):
                 loss.backward()
                 return loss
             
-            original_model_state = copy.deepcopy(local_model.state_dict())
+            # original_model_state = copy.deepcopy(local_model.state_dict())
+            
+            # calculate_gradients_closure()
+            
+            # norm = 0
+            # for model_param in local_model.parameters():
+            #     if model_param.grad is not None:
+            #         grad = model_param.grad
+            #         norm += torch.sum(grad*grad)
+
+            # for model_param in local_model.parameters():
+            #     scale = self.rho/torch.sqrt(norm+1e-12)
+            #     model_param.data += scale * model_param.grad  
+            
+            # loss = calculate_gradients_closure()
+            
+            # local_model.load_state_dict(original_model_state)
+            
+            # local_optimizer.step()
+            
+            original_params = [param.clone() for param in local_model.parameters()]
             
             calculate_gradients_closure()
-            
-            norm = 0
+        
+            norm = 0.0
             for model_param in local_model.parameters():
                 if model_param.grad is not None:
                     grad = model_param.grad
-                    norm += torch.sum(grad*grad + 1e-12)
+                    norm += torch.sum(grad * grad)
+            
+            scale = self.rho / (torch.sqrt(norm) + 1e-12)
 
-            for model_param in local_model.parameters():
-                scale = self.rho/torch.sqrt(norm)
-                model_param.data += scale * model_param.grad  
+            with torch.no_grad():
+                for model_param in local_model.parameters():
+                    if model_param.grad is not None:
+                        model_param.add_(model_param.grad * scale)
             
             loss = calculate_gradients_closure()
-            
-            local_model.load_state_dict(original_model_state)
+       
+            with torch.no_grad():
+                for model_param, original_p in zip(local_model.parameters(), original_params):
+                    model_param.copy_(original_p)
             
             local_optimizer.step()
-
             total_loss_accumulated += loss.item()
             total_samples_processed += batch_inputs.size(0)
         
