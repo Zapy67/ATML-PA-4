@@ -86,11 +86,22 @@ class FedSGD(FedMethod):
         super().__init__()
         self.client_weights = None if client_weights is None else list(client_weights)
 
+        # Track metrics
+        self.round_metrics = {
+            'fed_test_acc': [],
+            'fed_test_loss': [],
+            'central_test_acc': [],
+            'central_test_loss': [],
+            'client_drift': [],
+            'param_difference': []
+        }
+
     def _normalize_weights(self, n_clients: int, client_sizes: Optional[List[int]] = None) -> List[float]:
         if client_sizes is not None:
             total_size = sum(client_sizes)
             if total_size > 0:
                 return [size / total_size for size in client_sizes]
+            # If total_size is 0, fallback to equal weights
 
         if self.client_weights is not None:
             if len(self.client_weights) != n_clients:
@@ -115,63 +126,42 @@ class FedSGD(FedMethod):
 
         n_clients = len(clients)
         verbose = kwargs['verbose']
+        client_sizes = kwargs.get('client_sizes')
 
         if n_clients == 0:
             raise ValueError("clients must contain at least one model.")
         
         # normalize weights
-        weights = self._normalize_weights(n_clients)
+        weights = self._normalize_weights(n_clients, client_sizes)
 
-        server_optimizer: torch.optim.SGD = kwargs['server_optimizer']
+        # server_optimizer: torch.optim.SGD = kwargs['server_optimizer']
 
         print("Applying FedSGD on Server")
         if verbose:
             print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
 
-        server_optimizer.zero_grad(set_to_none=True)
+        # server_optimizer.zero_grad(set_to_none=True)
+        agg_state_dict = server.state_dict()
+        for key in agg_state_dict.keys():
+            agg_state_dict[key].zero_()
 
         with torch.no_grad():
-            for p_idx, server_param in enumerate(server.parameters()):
-                agg_grad = None
-
-                for client, weight in zip(clients, weights):
-                    client_param = list(client.parameters())[p_idx]
-                    client_grad = client_param.grad
-                    
-                    if client_grad is None:
-                        continue
-                    
+            for client, weight in zip(clients, weights):
+                client_state_dict = copy.deepcopy(client.state_dict())
+                for key in agg_state_dict.keys():
                     # Ensure same device
-                    if client_grad.device != server_param.device:
-                        client_grad = client_grad.to(server_param.device)
-                    
-                    # Weight the gradient
-                    weighted_grad = client_grad * weight
-                    
-                    if agg_grad is None:
-                        agg_grad = weighted_grad.clone()
-                    else:
-                        agg_grad += weighted_grad
-
-                if agg_grad is not None:
-                    server_param.grad = agg_grad
-
-        # Debug: print aggregated gradient norm
-        if verbose:
-            all_server_grads = [p.grad.detach().flatten() for p in server.parameters() 
-                            if p.grad is not None]
-            if all_server_grads:
-                grad_vec = torch.cat(all_server_grads)
-                print(f"Aggregated server grad_norm: {float(torch.norm(grad_vec)):.4f}")
-
-        server_optimizer.step()
-
-    def _train_client(self, client: SmallCNN, dataloader: DataLoader, criterion: nn.CrossEntropyLoss, device):
+                    if client_state_dict[key].device != agg_state_dict[key].device:
+                        client_state_dict[key] = client_state_dict[key].to(agg_state_dict[key].device)
+                        
+                    agg_state_dict[key] += client_state_dict[key] * weight
+                
+        server.load_state_dict(agg_state_dict)
+        
+    def _train_client(self, client: SmallCNN, dataloader: DataLoader, criterion: nn.CrossEntropyLoss, optimizer: torch.optim.Optimizer, device):
         client.to(device)
         client.train()
 
-        for p in client.parameters():
-            p.grad = None
+        optimizer.zero_grad(set_to_none=True)
         
         total_samples = 0.0
         total_loss= 0.0
@@ -197,6 +187,8 @@ class FedSGD(FedMethod):
             for p in client.parameters():
                 if p.grad is not None:
                     p.grad.div_(total_samples)
+
+        optimizer.step()
         
         avg_loss = total_loss / total_samples
 
@@ -206,6 +198,7 @@ class FedSGD(FedMethod):
 
         device = kwargs['device']
         verbose = kwargs['verbose']
+        lr = kwargs.get('lr', 0.01)
 
         criterion = nn.CrossEntropyLoss()
 
@@ -214,8 +207,10 @@ class FedSGD(FedMethod):
         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
             print(f"Training Client {i+1}/{len(clients)}")
 
-            client.load_state_dict(server.state_dict())
-            n_samples, avg_loss = self._train_client(client, loader, criterion, device)
+            params = copy.deepcopy(server.state_dict())
+            client.load_state_dict(params)
+            optimizer = torch.optim.SGD(client.parameters(), lr=lr)
+            n_samples, avg_loss = self._train_client(client, loader, criterion, optimizer, device)
 
             client_sizes.append(n_samples)
 
@@ -233,7 +228,6 @@ class FedSGD(FedMethod):
 
         kwargs['client_sizes'] = client_sizes
 
-
     def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()
         device = kwargs['device']
@@ -241,6 +235,13 @@ class FedSGD(FedMethod):
 
         server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
         central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
+
+        self.round_metrics['fed_test_acc'].append(server_acc)
+        self.round_metrics['fed_test_loss'].append(server_loss)
+        self.round_metrics['central_test_acc'].append(central_acc)
+        self.round_metrics['central_test_loss'].append(central_loss)
+        param_diff = compute_model_difference(server, central, norm_type='l2')
+        self.round_metrics['param_difference'].append(param_diff)
 
         print(f"FedSGD  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
         print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
@@ -260,6 +261,15 @@ class FedSAM(FedMethod):
         self.rho = sam_rho
         self.K = num_local_steps
 
+        # Track metrics
+        self.round_metrics = {
+            'fed_test_acc': [],
+            'fed_test_loss': [],
+            'central_test_acc': [],
+            'central_test_loss': [],
+            'client_drift': [],
+            'param_difference': []
+        }
     
     def debug_output(self, model):
         with torch.no_grad():
@@ -340,7 +350,7 @@ class FedSAM(FedMethod):
             batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
 
             def calculate_gradients_closure():
-                local_optimizer.zero_grad()
+                local_optimizer.zero_grad(set_to_none=True)
                 predictions = local_model(batch_inputs) 
                 loss = criterion(predictions, batch_targets)
                 loss.backward()
@@ -419,6 +429,13 @@ class FedSAM(FedMethod):
         
         central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
 
+        self.round_metrics['fed_test_acc'].append(server_acc)
+        self.round_metrics['fed_test_loss'].append(server_loss)
+        self.round_metrics['central_test_acc'].append(central_acc)
+        self.round_metrics['central_test_loss'].append(central_loss)
+        param_diff = compute_model_difference(server, central, norm_type='l2')
+        self.round_metrics['param_difference'].append(param_diff)
+
         print(f"FedSAM  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
         print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
 
@@ -433,6 +450,16 @@ class FedGH(FedMethod):
         super().__init__()
         self.client_weights = client_aggregation_weights 
         self.K = num_local_steps
+
+        # Track metrics
+        self.round_metrics = {
+            'fed_test_acc': [],
+            'fed_test_loss': [],
+            'central_test_acc': [],
+            'central_test_loss': [],
+            'client_drift': [],
+            'param_difference': []
+        }
 
     def debug_output(self, model):
         with torch.no_grad():
@@ -515,6 +542,10 @@ class FedGH(FedMethod):
         total_samples_processed = 0.0
         total_loss_accumulated = 0.0
         num_steps = 0
+        counter = 0
+        batch_steps = max(1, int(len(local_dataloader)/ self.K))
+        leftover = len(local_dataloader) - batch_steps * self.K
+        curr_samples = 0.0
         
         local_optimizer = torch.optim.SGD(
             local_model.parameters(), 
@@ -523,20 +554,28 @@ class FedGH(FedMethod):
             weight_decay=weight_decay
         )
 
+        local_optimizer.zero_grad(set_to_none=True)
+
         for data_batch in local_dataloader:
-            if num_steps == self.K:
-                break
-            num_steps +=1
+            counter +=1
             
             batch_inputs, batch_targets = data_batch
             batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
-            local_optimizer.zero_grad()
             predictions = local_model(batch_inputs) 
             loss = criterion(predictions, batch_targets)
             loss.backward()
-            local_optimizer.step()
             total_loss_accumulated += loss.item()
             total_samples_processed += batch_inputs.size(0)
+            if counter == (batch_steps + (1 if num_steps < leftover else 0)):
+                local_optimizer.step()
+                local_optimizer.zero_grad(set_to_none=True)
+                counter = 0
+                num_steps += 1
+                if leftover > 0: leftover -= 1
+
+        if num_steps < self.K:
+            local_optimizer.step()
+            local_optimizer.zero_grad(set_to_none=True)
         
         if total_samples_processed == 0:
             return 0, 0.0
@@ -582,6 +621,13 @@ class FedGH(FedMethod):
         server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
         
         central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
+
+        self.round_metrics['fed_test_acc'].append(server_acc)
+        self.round_metrics['fed_test_loss'].append(server_loss)
+        self.round_metrics['central_test_acc'].append(central_acc)
+        self.round_metrics['central_test_loss'].append(central_loss)
+        param_diff = compute_model_difference(server, central, norm_type='l2')
+        self.round_metrics['param_difference'].append(param_diff)
 
         print(f"FedGH   | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
         print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
@@ -643,17 +689,37 @@ class FedAvg(FedMethod):
         client.train()
         optimizer = torch.optim.SGD(client.parameters(), lr=lr)
         total_samples = 0
-        for epoch in range(self.local_epochs):
-            epoch_samples = 0
-            for inputs, targets in dataloader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                optimizer.zero_grad()
-                outputs = client(inputs)
-                loss = criterion(outputs, targets)
-                loss.backward()
+
+        num_steps = 0
+        counter = 0
+        batch_steps = max(1, int(len(dataloader)/ self.local_epochs))
+        leftover = len(dataloader) - batch_steps * self.local_epochs
+        curr_samples = 0.0
+
+        optimizer.zero_grad(set_to_none=True)
+
+        for inputs, targets in dataloader:
+            counter +=1
+            inputs, targets = inputs.to(device), targets.to(device)
+
+            outputs = client(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+
+            curr_samples += inputs.size(0)
+            total_samples += inputs.size(0)
+
+            if counter == (batch_steps + (1 if num_steps < leftover else 0)):
                 optimizer.step()
-                epoch_samples += inputs.size(0)
-            total_samples = epoch_samples
+                optimizer.zero_grad(set_to_none=True)
+                counter = 0
+                num_steps += 1
+                if leftover > 0: leftover -= 1
+
+        if num_steps < self.local_epochs:
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
         return total_samples
 
     def _compute_client_drift(self, clients: List[SmallCNN], server: SmallCNN,
@@ -681,7 +747,7 @@ class FedAvg(FedMethod):
         for idx in selected_indices:
             client = clients[idx]
             loader = client_dataloaders[idx]
-            print(f"Training Client {idx+1} for {self.local_epochs} epochs")
+            print(f"Training Client {idx+1}/{n_clients} for {self.local_epochs} epochs")
             client.load_state_dict(server.state_dict())
             n_samples = self._train_client_local(client, loader, criterion, lr, device)
             client_sizes.append(n_samples)
@@ -752,7 +818,17 @@ class FedProx(FedMethod):
     def __init__(self, client_weights: Optional[Sequence[float]] = None, local_rounds: int = 5):
         super().__init__()
         self.client_weights = None if client_weights is None else list(client_weights)
-        self.local_rounds = 5
+        self.K = local_rounds
+
+        # Track metrics
+        self.round_metrics = {
+            'fed_test_acc': [],
+            'fed_test_loss': [],
+            'central_test_acc': [],
+            'central_test_loss': [],
+            'client_drift': [],
+            'param_difference': []
+        }
 
     def _normalize_weights(self, n_clients: int, client_sizes: Optional[List[int]] = None) -> List[float]:
         if client_sizes is not None:
@@ -804,8 +880,8 @@ class FedProx(FedMethod):
             server_device = device
 
         with torch.no_grad():
-            server_sd_before = {k: v.detach().clone().to(server_device)
-                            for k, v in server.state_dict().items() if torch.is_tensor(v)}
+            server_sd_before = copy.deepcopy({k: v.detach().clone().to(server_device)
+                            for k, v in server.state_dict().items() if torch.is_tensor(v)})
 
             averaged_sd = {}
             for key, server_val in server.state_dict().items():
@@ -866,7 +942,7 @@ class FedProx(FedMethod):
         learning_rate = kwargs.get('lr', 0.001)
         momentum = kwargs.get('momentum', 0)
         weight_decay = kwargs.get('weight_decay', 0)
-        rounds = kwargs.get('rounds', self.local_rounds)
+        rounds = kwargs.get('rounds', self.K)
 
         mu = kwargs.get('mu', 0.01)
         theta_global = [p.detach().clone().to(device) for p in server.parameters()]
@@ -875,41 +951,73 @@ class FedProx(FedMethod):
             momentum=momentum, 
             weight_decay=weight_decay)
 
-        for _ in range(rounds):
-            optimizer.zero_grad()
+        num_steps = 0
+        counter = 0
+        batch_steps = max(1, int(len(dataloader)/ self.K))
+        leftover = len(dataloader) - batch_steps * self.K
+        curr_samples = 0.0
+
+        optimizer.zero_grad(set_to_none=True)
             
-            total_samples = 0.0
-            total_loss= 0.0
+        total_samples = 0.0
+        total_loss= 0.0
 
-            for batch in dataloader:
-                inputs, targets = batch
-                inputs, targets = inputs.to(device), targets.to(device)
+        for batch in dataloader:
+            counter +=1
 
-                out = client(inputs)
-                loss = criterion(out, targets)
+            inputs, targets = batch
+            inputs, targets = inputs.to(device), targets.to(device)
+
+            out = client(inputs)
+            loss = criterion(out, targets)
+            
+            batch_size = inputs.size(0)
+            scaled_loss = loss * batch_size
+            scaled_loss.backward()
+
+            total_loss += loss.item() * batch_size
+            curr_samples += inputs.size(0)
+            total_samples += inputs.size(0)
+                                                    
+            if counter == (batch_steps + (1 if num_steps < leftover else 0)):
                 
-                batch_size = inputs.size(0)
-                scaled_loss = loss * batch_size
-                scaled_loss.backward()
+                if curr_samples > 0:
+                    with torch.no_grad():
+                        for p in client.parameters():
+                            if p.grad is not None:
+                                p.grad.div_(curr_samples)
+                        # Prox Term
+                        for p, p_g in zip(client.parameters(), theta_global):
+                            prox = mu * (p.detach() - p_g)
+                            if p.grad is None:
+                                p.grad = prox.clone()
+                            else:
+                                p.grad.add_(prox)
 
-                total_loss += loss.item() * batch_size
-                total_samples += inputs.size(0)
-            
-            if total_samples > 0:
+                    curr_samples = 0.0
 
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                counter = 0
+                num_steps += 1
+                if leftover > 0: leftover -= 1
+
+        if num_steps < rounds:
+            if curr_samples > 0:
                 with torch.no_grad():
                     for p in client.parameters():
                         if p.grad is not None:
-                            p.grad.div_(total_samples)
-                    
+                            p.grad.div_(curr_samples)
+                    # Prox Term
                     for p, p_g in zip(client.parameters(), theta_global):
                         prox = mu * (p.detach() - p_g)
                         if p.grad is None:
                             p.grad = prox.clone()
                         else:
                             p.grad.add_(prox)
-        
+                curr_samples = 0.0
             optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
         if total_samples == 0:
             return 0, 0.0
@@ -931,8 +1039,8 @@ class FedProx(FedMethod):
         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
             print(f"Training Client {i+1}/{len(clients)}")
 
-            client.load_state_dict(server.state_dict())
-            n_samples, avg_loss = self._train_client(server, client, loader, criterion, device)
+            client.load_state_dict(copy.deepcopy(server.state_dict()))
+            n_samples, avg_loss = self._train_client(server, client, loader, criterion, device, **kwargs)
 
             client_sizes.append(n_samples)
 
@@ -958,6 +1066,13 @@ class FedProx(FedMethod):
 
         server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
         central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
+
+        self.round_metrics['fed_test_acc'].append(server_acc)
+        self.round_metrics['fed_test_loss'].append(server_loss)
+        self.round_metrics['central_test_acc'].append(central_acc)
+        self.round_metrics['central_test_loss'].append(central_loss)
+        param_diff = compute_model_difference(server, central, norm_type='l2')
+        self.round_metrics['param_difference'].append(param_diff)
 
         print(f"FedProx  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
         print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
