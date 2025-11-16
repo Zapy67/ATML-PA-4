@@ -140,22 +140,56 @@ class FedSGD(FedMethod):
         if verbose:
             print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
 
-        # server_optimizer.zero_grad(set_to_none=True)
-        agg_state_dict = copy.deepcopy(server.state_dict())
-        for key in agg_state_dict.keys():
-            agg_state_dict[key].zero_()
+        server_sd = server.state_dict()
+        agg_state_dict = {}
+
+        # Make zeroed clones for float tensors, clone (unchanged) for others.
+        for k, v in server_sd.items():
+            if torch.is_floating_point(v):
+                agg_state_dict[k] = v.clone().zero_()
+            else:
+                # keep a clone of non-float buffers (int64, bool, etc.)
+                agg_state_dict[k] = v.clone()
 
         with torch.no_grad():
             for client, weight in zip(clients, weights):
-                client_state_dict = copy.deepcopy(client.state_dict())
-                for key in agg_state_dict.keys():
-                    # Ensure same device
-                    if client_state_dict[key].device != agg_state_dict[key].device:
-                        client_state_dict[key] = client_state_dict[key].to(agg_state_dict[key].device)
-                        
-                    agg_state_dict[key] += client_state_dict[key] * weight
-                
+                client_sd = client.state_dict()
+                for k in agg_state_dict.keys():
+                    # Only aggregate floating tensors
+                    if not torch.is_floating_point(agg_state_dict[k]):
+                        continue
+
+                    # Move client's tensor to same device/dtype as agg tensor
+                    src = client_sd[k]
+                    if src.device != agg_state_dict[k].device:
+                        src = src.to(agg_state_dict[k].device)
+                    # ensure float dtype (should be float, but cast to be safe)
+                    if src.dtype != agg_state_dict[k].dtype:
+                        src = src.to(dtype=agg_state_dict[k].dtype)
+
+                    # weight is python float -> multiply directly
+                    agg_state_dict[k] += src * float(weight)
+
+        # Load aggregated state into server (non-float keys come from server clones)
         server.load_state_dict(agg_state_dict)
+
+
+        # # server_optimizer.zero_grad(set_to_none=True)
+        # agg_state_dict = copy.deepcopy(server.state_dict())
+        # for key in agg_state_dict.keys():
+        #     agg_state_dict[key].zero_()
+
+        # with torch.no_grad():
+        #     for client, weight in zip(clients, weights):
+        #         client_state_dict = copy.deepcopy(client.state_dict())
+        #         for key in agg_state_dict.keys():
+        #             # Ensure same device
+        #             if client_state_dict[key].device != agg_state_dict[key].device:
+        #                 client_state_dict[key] = client_state_dict[key].to(agg_state_dict[key].device)
+                        
+        #             agg_state_dict[key] += client_state_dict[key] * weight
+                
+        # server.load_state_dict(agg_state_dict)
         
     def _train_client(self, client: SmallCNN, dataloader: DataLoader, criterion: nn.CrossEntropyLoss, optimizer: torch.optim.Optimizer, device):
         client.to(device)
