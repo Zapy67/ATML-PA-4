@@ -733,18 +733,14 @@ class FedGH(FedMethod):
             momentum=momentum, 
             weight_decay=weight_decay
         )
-        local_optimizer.zero_grad()
-        
         for data_batch in local_dataloader:
-            if num_steps == K:
-                local_optimizer.step()
-                local_optimizer.zero_grad()
-                num_steps = 0
-        
-            num_steps +=1    
+            if num_steps == self.K:
+                break
+            num_steps +=1
+            
             batch_inputs, batch_targets = data_batch
             batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
-            
+            local_optimizer.zero_grad()
             predictions = local_model(batch_inputs) 
             loss = criterion(predictions, batch_targets)
             loss.backward()
