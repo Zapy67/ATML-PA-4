@@ -681,7 +681,6 @@ class FedGH(FedMethod):
             print(f"Aggregating {num_clients} clients with weights: {[f'{weight:.3f}' for weight in aggregation_weights]}")
 
         def harmonize_gradients(grads_list):
-            # operate on clones to avoid mutating inputs
             harmonized_grads = []
             for g in grads_list:
                 g_i = g.clone()
