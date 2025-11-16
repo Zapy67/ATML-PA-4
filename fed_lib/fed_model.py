@@ -96,17 +96,17 @@ class Federation:
             print("Training Server")
             self.federated_method.exec_server_round(self.clients, self.server, **kwargs)
 
-            # print("Training Central")
-            # train_model_one_epoch(central_model, self.centralized_train_loader, criterion, central_optimizer, self.device, verbose)
+            print("Training Central")
+            train_model_one_epoch(central_model, self.centralized_train_loader, criterion, central_optimizer, self.device, verbose)
 
             # Test
             print(f"Evaluate on round {round+1}:")
-            # self.federated_method.evaluate_round(self.server, central_model, **kwargs)
+            self.federated_method.evaluate_round(self.server, central_model, **kwargs)
             
             self.federated_method.evaluate_round(self.server, None, **kwargs)
 
-            # if verbose:
-            #     compare_model_parameters(self.server, central_model, "Server", "Central")
+            if verbose:
+                compare_model_parameters(self.server, central_model, "Server", "Central")
             
         
         print("Training Complete!")
