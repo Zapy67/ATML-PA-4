@@ -73,7 +73,7 @@ class Federation:
     def set_method(self, method: FedMethod):
         self.federated_method = method
 
-    def train(self, rounds: int, lr = 0.01, verbose=False, **kwargs):
+    def train(self, rounds: int, lr = 0.01, verbose=False, train_central=True, **kwargs):
         criterion = nn.CrossEntropyLoss()
         
         central_model = deepcopy(self.server)
@@ -96,8 +96,9 @@ class Federation:
             print("Training Server")
             self.federated_method.exec_server_round(self.clients, self.server, **kwargs)
 
-            print("Training Central")
-            train_model_one_epoch(central_model, self.centralized_train_loader, criterion, central_optimizer, self.device, verbose)
+            if train_central:
+                print("Training Central")
+                train_model_one_epoch(central_model, self.centralized_train_loader, criterion, central_optimizer, self.device, verbose)
 
             # Test
             print(f"Evaluate on round {round+1}:")
@@ -112,8 +113,8 @@ class Federation:
         print("Training Complete!")
 
         self.federated_method.evaluate_server(self.server, central_model, **kwargs)
-
-        compare_model_parameters(self.server, central_model, "Server", "Central", verbose=verbose)
+        if train_central:
+            compare_model_parameters(self.server, central_model, "Server", "Central", verbose=verbose)
 
     def test(self):
         raise NotImplementedError
