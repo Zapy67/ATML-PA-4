@@ -738,8 +738,8 @@ class FedAvg(FedMethod):
 
             outputs = client(inputs)
             loss = criterion(outputs, targets)
-            batch_size = inputs.size(0)
-            scaled_loss = loss * batch_size
+
+            scaled_loss = loss * inputs.size(0)
             scaled_loss.backward()
 
             curr_samples += inputs.size(0)
@@ -817,16 +817,48 @@ class FedAvg(FedMethod):
         print(f"Aggregating {n_selected} clients")
         if verbose:
             print(f"Weights: {[f'{w:.3f}' for w in weights]}")
+
+        # Start from server state to preserve non-float buffers
+        server_sd = copy.deepcopy(server.state_dict())
+        agg_state = {}
+
+        # initialize aggregator: zero float tensors, clone non-floats
+        for k, v in server_sd.items():
+            if torch.is_floating_point(v):
+                agg_state[k] = v.clone().zero_()
+            else:
+                agg_state[k] = v.clone()
+
         with torch.no_grad():
-            for p_idx, server_param in enumerate(server.parameters()):
-                aggregated = None
-                for client_idx, weight in zip(selected_indices, weights):
-                    client_param = list(clients[client_idx].parameters())[p_idx]
-                    if client_param.device != server_param.device:
-                        client_param = client_param.to(server_param.device)
-                    weighted_param = client_param * weight
-                    aggregated = weighted_param.clone() if aggregated is None else aggregated + weighted_param
-                server_param.copy_(aggregated)
+            for client_idx, weight in zip(selected_indices, weights):
+                client_sd = copy.deepcopy(clients[client_idx].state_dict())
+                for k in agg_state.keys():
+                    # skip non-float buffers
+                    if not torch.is_floating_point(agg_state[k]):
+                        continue
+
+                    src = client_sd[k]
+                    # move src to agg device if needed
+                    if src.device != agg_state[k].device:
+                        src = src.to(agg_state[k].device)
+                    # match dtype
+                    if src.dtype != agg_state[k].dtype:
+                        src = src.to(dtype=agg_state[k].dtype)
+
+                    agg_state[k] += src * float(weight)
+
+        # load aggregated params back to server
+        server.load_state_dict(agg_state)
+        # with torch.no_grad():
+        #     for p_idx, server_param in enumerate(server.parameters()):
+        #         aggregated = None
+        #         for client_idx, weight in zip(selected_indices, weights):
+        #             client_param = list(clients[client_idx].parameters())[p_idx]
+        #             if client_param.device != server_param.device:
+        #                 client_param = client_param.to(server_param.device)
+        #             weighted_param = client_param * weight
+        #             aggregated = weighted_param.clone() if aggregated is None else aggregated + weighted_param
+        #         server_param.copy_(aggregated)
 
     def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()
