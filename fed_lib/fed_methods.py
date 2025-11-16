@@ -578,11 +578,13 @@ class FedGH(FedMethod):
         criterion = nn.CrossEntropyLoss(reduction='sum')
         device = kwargs['device']
         test_loader = kwargs['test_loader']
-        
 
         server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
         
+        central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
+
         print(f"FedGH   | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
+        print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
         
     def evaluate_server(self, server: nn.Module, central: nn.Module, **kwargs):
         self.evaluate_round(server, central, **kwargs)
