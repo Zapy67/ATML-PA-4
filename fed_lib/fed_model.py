@@ -102,6 +102,8 @@ class Federation:
             # Test
             print(f"Evaluate on round {round+1}:")
             self.federated_method.evaluate_round(self.server, central_model, **kwargs)
+            
+            self.federated_method.evaluate_round(self.server, None, **kwargs)
 
             if verbose:
                 compare_model_parameters(self.server, central_model, "Server", "Central")

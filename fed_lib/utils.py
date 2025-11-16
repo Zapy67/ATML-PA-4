@@ -45,7 +45,9 @@ import random
 import math
 import matplotlib.pyplot as plt
 import numpy as np
-from fedlab.utils.dataset import BasicPartitioner
+
+
+from fedlab.utils.dataset.functional import hetero_dir_partition
 
   
 ### Basic Model
@@ -64,10 +66,13 @@ class SmallConvBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels),
             nn.MaxPool2d(2, 2),
-            nn.Dropout(0.2),
+            nn.Dropout(0.25),
         )
         
     def forward(self, x):
@@ -77,29 +82,20 @@ class SmallConvBlock(nn.Module):
         return f"{self.__class__.__name__}(in_channels={self.block[0].in_channels}, out_channels={self.block[0].out_channels})"
 
 class SmallCNN(nn.Module):
-    """
-    Small CNN for CIFAR-10.
-
-    Architecture:
-        - SmallConvBlock(3 -> 32)
-        - SmallConvBlock(32 -> 64)
-        - Flatten -> Linear(64 -> num_classes)
-
-    Args:
-        num_classes (int): number of output classes (default 10).
-    """
+   
     def __init__(self, num_classes=10):
         super().__init__()
 
         self.backbone = nn.Sequential(
             SmallConvBlock(3, 32),
             SmallConvBlock(32, 64),
-            nn.AdaptiveAvgPool2d((1,1))
+            SmallConvBlock(64, 128),
         )
 
         self.task_head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(64, num_classes)
+            nn.Linear(128*4*4, 128),   
+            nn.Linear(128, num_classes)
         )
 
     def forward(self, x):
@@ -418,22 +414,24 @@ def get_homogenous_domains(
 
     return client_train_loaders
 
-def _make_heterogenous_subsets(dataset, num_clients, min_require_size, alpha, seed):
-    client_indices = BasicPartitioner(dataset.targets, num_clients, partition="noniid-labeldir", dir_alpha=alpha, seed=seed, min_require_size=min_require_size)
-    return client_indices
-
+  
 def get_heterogenous_domains(
         trainset: DataLoader,
         clients: int, 
         min_require_size: int, 
+        balance=True,
         seed: int = 42, 
         batch_size: int = 32,
         alpha: float = 0.1,
+        verbose: bool = False
         ) -> List[DataLoader]:
     
     train_dataset = trainset.dataset
-    train_client_indices = _make_heterogenous_subsets(train_dataset, clients, min_require_size, alpha, seed)
-
+    num_classes = len(train_dataset.classes)
+    
+    train_client_indices = hetero_dir_partition(train_dataset.targets, clients, num_classes, 
+                                        alpha, min_require_size)
+   
     # Build DataLoaders for each client, preserving some DataLoader kwargs
     dl_kwargs = {}
     if hasattr(trainset, "num_workers"):
@@ -582,3 +580,63 @@ def compare_model_parameters(model1: nn.Module, model2: nn.Module,
         print(f"{'='*70}\n")
     
     return stats
+
+#client drift
+def calculate_client_drift_metrics(global_model: nn.Module, 
+                                   local_models: List[nn.Module], show_top_k: int = 5, verbose:bool = True) -> Dict[str, float]:
+    
+    per_client_drifts = []
+    for local_model in local_models:
+        l2_norm = compute_model_difference(local_model, global_model)
+        per_client_drifts.append(l2_norm)
+
+    drift_summary = {
+        'mean_client_drift': np.mean(per_client_drifts),
+        'per_client_drifts': per_client_drifts
+    }
+     
+    if verbose:  
+        print(f"\n{'='*70}")
+        print(f"Client Drift Stats:")
+   
+        print(f"{'='*70}")
+        print(f"Client Drift Mean: {np.mean(per_client_drifts):.6e}")
+        print(f"Client Drift Std: {np.std(per_client_drifts):.6e}")
+        top_k_clients = np.argsort(per_client_drifts)[:show_top_k]
+        print(f"Top {show_top_k} Clients with Greatest Drift")
+        for idx in top_k_clients:
+            print(f"Client Number: {idx:.6e} Drift :{per_client_drifts[idx]:6e}")
+            
+        print(f"{'='*70}\n")
+
+    return drift_summary
+
+
+def calculate_label_skew(dataset: Dataset, verbose:bool =True):
+    if hasattr(dataset, "targets"):
+        all_labels = dataset.targets
+    else:
+        data_loader = DataLoader(dataset, batch_size=64)
+        label_batches = []  
+        for _, batch_labels in data_loader: 
+            label_batches.append(batch_labels)
+
+        all_labels = torch.cat(label_batches, dim=0)
+    
+   
+    label_distribution = np.bincount(all_labels) / len(all_labels)
+
+    epsilon = 0.01
+    label_entropy = -np.sum(label_distribution * np.log(label_distribution + epsilon))
+    num_classes = len(np.unique(all_labels))
+
+    if verbose:
+        print(f"{'='*70}")
+        print(f"Label Distribution (P(Y)): {label_distribution.round(decimals=3)}")
+        print(f"Entropy of Label Distribution H(P(Y)): {label_entropy}")
+        print(f"Normalized Entropy of Label Distribution: {label_entropy / np.log(num_classes)}")
+        print(f"{'='*70}\n")
+    return label_entropy
+
+
+
