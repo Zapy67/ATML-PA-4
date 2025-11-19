@@ -404,7 +404,7 @@ class FedAvg(FedMethod):
         print(f"FedAvg  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
 
     def evaluate_server(self, server: SmallCNN, central: SmallCNN, **kwargs):
-        self.evaluate_round(server, central, **kwargs)
+        self.evaluate_round(server, **kwargs)
 
     def get_metrics(self):
         return self.round_metrics
