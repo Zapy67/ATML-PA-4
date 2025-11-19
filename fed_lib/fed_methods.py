@@ -369,7 +369,7 @@ class FedAvg(FedMethod):
         server_sd = copy.deepcopy(server.state_dict())
         agg_state = {}
         for k, v in server_sd.items():
-            agg_state[k] = v.clone().zero_()
+            agg_state[k] = v.clone().zero_().dtype(torch.float32)
             
 
         with torch.no_grad():
