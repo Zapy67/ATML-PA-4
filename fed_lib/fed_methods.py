@@ -285,12 +285,13 @@ class FedSGD(FedMethod):
 
 
 class FedAvg(FedMethod):
-    def __init__(self, local_epochs: int = 5, minibatch: int=32,
+    def __init__(self, local_epochs: int = 5, num_steps: int=32,
                  client_weights: Optional[Sequence[float]] = None,
                  sample_fraction: float = 1.0):
         super().__init__()
         self.local_epochs = local_epochs
-        self.minibatch = minibatch
+        # self.minibatch = minibatch
+        self.num_steps = num_steps
         self.client_weights = None if client_weights is None else list(client_weights)
         self.sample_fraction = sample_fraction
 
@@ -314,9 +315,11 @@ class FedAvg(FedMethod):
         optimizer = torch.optim.SGD(client.parameters(), lr=lr)
         total_loss = 0
         total_samples = 0
-        num_steps = np.floor(self.minibatch/dataloader.batch_size)
-        num_steps = max(1, num_steps)
+        # num_steps = np.floor(self.minibatch/dataloader.batch_size)
+        # num_steps = max(1, num_steps)
         counter = 0
+        step = np.ceil(len(dataloader)/self.num_steps)
+        step = min(1, step)
       
         optimizer.zero_grad(set_to_none=True)
 
@@ -332,7 +335,7 @@ class FedAvg(FedMethod):
                 scaled_loss.backward()
                 total_samples += inputs.size(0)
                 
-                if counter % num_steps == 0 or (batch_idx+1)==len(dataloader): 
+                if counter % step == 0 or (batch_idx+1)==len(dataloader): 
                     optimizer.step()
                     optimizer.zero_grad()
             
