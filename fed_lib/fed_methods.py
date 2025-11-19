@@ -369,7 +369,7 @@ class FedAvg(FedMethod):
         server_sd = copy.deepcopy(server.state_dict())
         agg_state = {}
         for k, v in server_sd.items():
-            agg_state[k] = v.clone().zero_().dtype(torch.float32)
+            agg_state[k] = v.clone().zero_()
             
 
         with torch.no_grad():
@@ -381,6 +381,7 @@ class FedAvg(FedMethod):
                     src = client_sd[k]
                     if src.device != agg_state[k].device:
                         src = src.to(agg_state[k].device)
+                    print(k)
                     agg_state[k] += src * float(weight)
 
         server.load_state_dict(agg_state)
