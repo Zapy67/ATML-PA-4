@@ -366,8 +366,8 @@ class FedAvg(FedMethod):
     def exec_server_round(self, clients: List[SmallCNN], server: SmallCNN, **kwargs):
         selected_indices = kwargs.get('selected_indices', list(range(len(clients))))
         n_selected = len(selected_indices)
-        total = sum(kwargs['client_sizes'])
-        weights = [client_size/total for client_size in kwargs['client_size']]
+        total = np.array([self.client_weights[idx] for idx in selected_indices])
+        weights = total/sum(total)
        
         server_sd = copy.deepcopy(server.state_dict())
         agg_state = {}
