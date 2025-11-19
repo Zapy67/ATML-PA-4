@@ -383,10 +383,6 @@ class FedAvg(FedMethod):
                     src = client_sd[k]
                     if src.device != agg_state[k].device:
                         src = src.to(agg_state[k].device)
-                
-                    if src.dtype != agg_state[k].dtype:
-                        src = src.to(dtype=agg_state[k].dtype)
-
                     agg_state[k] += src * float(weight)
 
         server.load_state_dict(agg_state)
