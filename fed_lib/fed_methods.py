@@ -394,7 +394,7 @@ class FedAvg(FedMethod):
         server.load_state_dict(agg_state)
         selected_clients = [clients[client_idx] for client_idx in selected_indices]
         drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
-        self.round_metrics['client_drift'] = drift_summary
+        self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
 
     def evaluate_round(self, server: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()
