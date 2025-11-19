@@ -321,19 +321,20 @@ class FedAvg(FedMethod):
       
         optimizer.zero_grad(set_to_none=True)
 
-        for batch_idx, (inputs, targets) in enumerate(dataloader):
-            counter +=1
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = client(inputs)
-            loss = criterion(outputs, targets)
-            scaled_loss = loss * inputs.size(0)
-            total_loss += scaled_loss.item()
-            scaled_loss.backward()
-            total_samples += inputs.size(0)
-            
-            if counter % num_steps == 0 or (batch_idx+1)==len(dataloader): 
-                 optimizer.step()
-                 optimizer.zero_grad(set_to_none=True)
+        for epoch in range(self.local_epochs):
+            for batch_idx, (inputs, targets) in enumerate(dataloader):
+                counter +=1
+                inputs, targets = inputs.to(device), targets.to(device)
+                outputs = client(inputs)
+                loss = criterion(outputs, targets)
+                scaled_loss = loss * inputs.size(0)
+                total_loss += scaled_loss.item()
+                scaled_loss.backward()
+                total_samples += inputs.size(0)
+                
+                if counter % num_steps == 0 or (batch_idx+1)==len(dataloader): 
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
             
         return total_samples
 
@@ -365,6 +366,8 @@ class FedAvg(FedMethod):
     def exec_server_round(self, clients: List[SmallCNN], server: SmallCNN, **kwargs):
         selected_indices = kwargs.get('selected_indices', list(range(len(clients))))
         n_selected = len(selected_indices)
+        total = sum(kwargs['client_size'])
+        weights = [client_size/total for client_size in kwargs['client_size']]
        
         server_sd = copy.deepcopy(server.state_dict())
         agg_state = {}
@@ -374,13 +377,9 @@ class FedAvg(FedMethod):
             else:
                 agg_state[k] = v.clone()
 
-        
-
-   
         with torch.no_grad():
-            for client_idx in selected_indices:
-                weight = self.client_weights[client_idx]
-                client_sd = clients[client_idx].state_dict()
+            for client, weight in zip(clients, weights):
+                client_sd = client.state_dict()
                 
                 for k in agg_state.keys():    
                     src = client_sd[k]
