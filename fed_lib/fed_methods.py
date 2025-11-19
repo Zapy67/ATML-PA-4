@@ -312,7 +312,6 @@ class FedAvg(FedMethod):
         client.to(device)
         client.train()
         optimizer = torch.optim.SGD(client.parameters(), lr=lr)
-        total_samples = 0
         total_loss = 0
         total_samples = 0
         num_steps = np.floor(self.minibatch/dataloader.batch_size)
@@ -322,6 +321,7 @@ class FedAvg(FedMethod):
         optimizer.zero_grad(set_to_none=True)
 
         for epoch in range(self.local_epochs):
+            counter=0
             for batch_idx, (inputs, targets) in enumerate(dataloader):
                 counter +=1
                 inputs, targets = inputs.to(device), targets.to(device)
@@ -334,7 +334,7 @@ class FedAvg(FedMethod):
                 
                 if counter % num_steps == 0 or (batch_idx+1)==len(dataloader): 
                     optimizer.step()
-                    optimizer.zero_grad(set_to_none=True)
+                    optimizer.zero_grad()
             
         return total_samples
 
