@@ -140,22 +140,56 @@ class FedSGD(FedMethod):
         if verbose:
             print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
 
-        # server_optimizer.zero_grad(set_to_none=True)
-        agg_state_dict = server.state_dict()
-        for key in agg_state_dict.keys():
-            agg_state_dict[key].zero_()
+        server_sd = server.state_dict()
+        agg_state_dict = {}
+
+        # Make zeroed clones for float tensors, clone (unchanged) for others.
+        for k, v in server_sd.items():
+            if torch.is_floating_point(v):
+                agg_state_dict[k] = v.clone().zero_()
+            else:
+                # keep a clone of non-float buffers (int64, bool, etc.)
+                agg_state_dict[k] = v.clone()
 
         with torch.no_grad():
             for client, weight in zip(clients, weights):
-                client_state_dict = copy.deepcopy(client.state_dict())
-                for key in agg_state_dict.keys():
-                    # Ensure same device
-                    if client_state_dict[key].device != agg_state_dict[key].device:
-                        client_state_dict[key] = client_state_dict[key].to(agg_state_dict[key].device)
-                        
-                    agg_state_dict[key] += client_state_dict[key] * weight
-                
+                client_sd = client.state_dict()
+                for k in agg_state_dict.keys():
+                    # Only aggregate floating tensors
+                    if not torch.is_floating_point(agg_state_dict[k]):
+                        continue
+
+                    # Move client's tensor to same device/dtype as agg tensor
+                    src = client_sd[k]
+                    if src.device != agg_state_dict[k].device:
+                        src = src.to(agg_state_dict[k].device)
+                    # ensure float dtype (should be float, but cast to be safe)
+                    if src.dtype != agg_state_dict[k].dtype:
+                        src = src.to(dtype=agg_state_dict[k].dtype)
+
+                    # weight is python float -> multiply directly
+                    agg_state_dict[k] += src * float(weight)
+
+        # Load aggregated state into server (non-float keys come from server clones)
         server.load_state_dict(agg_state_dict)
+
+
+        # # server_optimizer.zero_grad(set_to_none=True)
+        # agg_state_dict = copy.deepcopy(server.state_dict())
+        # for key in agg_state_dict.keys():
+        #     agg_state_dict[key].zero_()
+
+        # with torch.no_grad():
+        #     for client, weight in zip(clients, weights):
+        #         client_state_dict = copy.deepcopy(client.state_dict())
+        #         for key in agg_state_dict.keys():
+        #             # Ensure same device
+        #             if client_state_dict[key].device != agg_state_dict[key].device:
+        #                 client_state_dict[key] = client_state_dict[key].to(agg_state_dict[key].device)
+                        
+        #             agg_state_dict[key] += client_state_dict[key] * weight
+                
+        # server.load_state_dict(agg_state_dict)
         
     def _train_client(self, client: SmallCNN, dataloader: DataLoader, criterion: nn.CrossEntropyLoss, optimizer: torch.optim.Optimizer, device):
         client.to(device)
@@ -198,7 +232,7 @@ class FedSGD(FedMethod):
 
         device = kwargs['device']
         verbose = kwargs['verbose']
-        lr = kwargs.get('lr', 0.01)
+        lr = kwargs.get('lr', 1e-3)
 
         criterion = nn.CrossEntropyLoss()
 
@@ -924,12 +958,19 @@ class FedAvg(FedMethod):
 
             outputs = client(inputs)
             loss = criterion(outputs, targets)
-            loss.backward()
+
+            scaled_loss = loss * inputs.size(0)
+            scaled_loss.backward()
 
             curr_samples += inputs.size(0)
             total_samples += inputs.size(0)
 
             if counter == (batch_steps + (1 if num_steps < leftover else 0)):
+                with torch.no_grad():
+                    for p in client.parameters():
+                        if p.grad is not None:
+                            p.grad.div_(curr_samples)
+                curr_samples = 0
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
                 counter = 0
@@ -937,6 +978,10 @@ class FedAvg(FedMethod):
                 if leftover > 0: leftover -= 1
 
         if num_steps < self.local_epochs:
+            with torch.no_grad():
+                for p in client.parameters():
+                    if p.grad is not None:
+                        p.grad.div_(curr_samples)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
@@ -968,7 +1013,7 @@ class FedAvg(FedMethod):
             client = clients[idx]
             loader = client_dataloaders[idx]
             print(f"Training Client {idx+1}/{n_clients} for {self.local_epochs} epochs")
-            client.load_state_dict(server.state_dict())
+            client.load_state_dict(copy.deepcopy(server.state_dict()))
             n_samples = self._train_client_local(client, loader, criterion, lr, device)
             client_sizes.append(n_samples)
             if verbose:
@@ -992,16 +1037,48 @@ class FedAvg(FedMethod):
         print(f"Aggregating {n_selected} clients")
         if verbose:
             print(f"Weights: {[f'{w:.3f}' for w in weights]}")
+
+        # Start from server state to preserve non-float buffers
+        server_sd = copy.deepcopy(server.state_dict())
+        agg_state = {}
+
+        # initialize aggregator: zero float tensors, clone non-floats
+        for k, v in server_sd.items():
+            if torch.is_floating_point(v):
+                agg_state[k] = v.clone().zero_()
+            else:
+                agg_state[k] = v.clone()
+
         with torch.no_grad():
-            for p_idx, server_param in enumerate(server.parameters()):
-                aggregated = None
-                for client_idx, weight in zip(selected_indices, weights):
-                    client_param = list(clients[client_idx].parameters())[p_idx]
-                    if client_param.device != server_param.device:
-                        client_param = client_param.to(server_param.device)
-                    weighted_param = client_param * weight
-                    aggregated = weighted_param.clone() if aggregated is None else aggregated + weighted_param
-                server_param.copy_(aggregated)
+            for client_idx, weight in zip(selected_indices, weights):
+                client_sd = copy.deepcopy(clients[client_idx].state_dict())
+                for k in agg_state.keys():
+                    # skip non-float buffers
+                    if not torch.is_floating_point(agg_state[k]):
+                        continue
+
+                    src = client_sd[k]
+                    # move src to agg device if needed
+                    if src.device != agg_state[k].device:
+                        src = src.to(agg_state[k].device)
+                    # match dtype
+                    if src.dtype != agg_state[k].dtype:
+                        src = src.to(dtype=agg_state[k].dtype)
+
+                    agg_state[k] += src * float(weight)
+
+        # load aggregated params back to server
+        server.load_state_dict(agg_state)
+        # with torch.no_grad():
+        #     for p_idx, server_param in enumerate(server.parameters()):
+        #         aggregated = None
+        #         for client_idx, weight in zip(selected_indices, weights):
+        #             client_param = list(clients[client_idx].parameters())[p_idx]
+        #             if client_param.device != server_param.device:
+        #                 client_param = client_param.to(server_param.device)
+        #             weighted_param = client_param * weight
+        #             aggregated = weighted_param.clone() if aggregated is None else aggregated + weighted_param
+        #         server_param.copy_(aggregated)
 
     def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()

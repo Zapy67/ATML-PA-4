@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-from fedlab.utils.dataset.functional import hetero_dir_partition
+from fedlab.utils.dataset.functional import hetero_dir_partition, homo_partition
 
   
 ### Basic Model
