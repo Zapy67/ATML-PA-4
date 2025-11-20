@@ -352,6 +352,7 @@ class FedAvg(FedMethod):
         n_selected = len(selected_indices)
         total = np.array([self.client_weights[idx] for idx in selected_indices])
         weights = total/sum(total)
+        selected_clients = [clients[client_idx] for client_idx in selected_indices]
 
         drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
         self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
@@ -364,7 +365,7 @@ class FedAvg(FedMethod):
             else:
                 agg_state[k] = v.clone()
 
-        selected_clients = [clients[client_idx] for client_idx in selected_indices]
+        
         with torch.no_grad():
             for client, weight in zip(selected_clients, weights):
                 client_sd = client.state_dict()
