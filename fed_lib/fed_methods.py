@@ -464,7 +464,7 @@ class FedSAM(FedAvg):
                         model_param.copy_(original_p)
             
                 optimizer.step()
-                total_loss_accumulated += loss.item()
+                total_loss_accumulated += loss
                 buffer.clear()
         
         total_samples_processed = len(dataloader.dataset.indices)
