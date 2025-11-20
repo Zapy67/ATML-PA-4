@@ -254,12 +254,12 @@ class FedSGD(FedMethod):
 
 
 class FedAvg(FedMethod):
-    def __init__(self, local_epochs: int = 5, num_steps_per_epoch: int=32,
+    def __init__(self, local_epochs: int = 5, aggregation_steps: int=32,
                  client_weights: Optional[Sequence[float]] = None,
                  sample_fraction: float = 1.0):
         super().__init__()
         self.local_epochs = local_epochs
-        self.num_steps_per_epoch = num_steps_per_epoch
+        self.aggregation_steps = aggregation_steps
         self.client_weights = None if client_weights is None else list(client_weights)
         self.sample_fraction = sample_fraction
        
@@ -289,11 +289,12 @@ class FedAvg(FedMethod):
                            criterion: nn.CrossEntropyLoss, lr: float, device: torch.device) -> int:
         client.to(device)
         client.train()
-        total_samples = len(dataloader.dataset.indices)
-        optimizer = torch.optim.SGD(client.parameters(), lr=lr/total_samples)
+        n_samples = len(dataloader.dataset.indices)
         total_loss = 0
-        step = np.ceil(len(dataloader)/self.num_steps_per_epoch)
+        step = np.ceil(len(dataloader)/self.aggregation_steps)
         step = max(1, step)
+
+        optimizer = torch.optim.SGD(client.parameters(), lr=lr*self.aggregation_steps/ n_samples)
       
         optimizer.zero_grad(set_to_none=True)
 
@@ -306,12 +307,12 @@ class FedAvg(FedMethod):
                 total_loss += scaled_loss.item()
                 scaled_loss.backward()
              
-                if ((batch_idx % step) == 0) or (batch_idx+1)==len(dataloader): 
+                if (((batch_idx+1) % step) == 0) or (batch_idx+1)==len(dataloader): 
                     optimizer.step()
                     optimizer.zero_grad(set_to_none=True)
                     
 
-        return total_samples*self.local_epochs
+        return n_samples*self.local_epochs
 
     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN],
                          client_dataloaders: List[DataLoader], **kwargs):
