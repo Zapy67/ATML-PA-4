@@ -300,7 +300,7 @@ class FedAvg(FedMethod):
       
         optimizer.zero_grad(set_to_none=True)
 
-        def normalize_grad(list[tensor])
+        # def normalize_grad(list[tensor])
 
         for epoch in range(self.local_epochs):
             counter=0
