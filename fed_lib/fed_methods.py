@@ -198,7 +198,6 @@ class FedSGD(FedMethod):
                     optimizer.zero_grad()
         
         avg_loss = total_loss / total_samples
-
         return total_samples, avg_loss
 
     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN], client_dataloaders: List[DataLoader], **kwargs):
@@ -353,6 +352,9 @@ class FedAvg(FedMethod):
         n_selected = len(selected_indices)
         total = np.array([self.client_weights[idx] for idx in selected_indices])
         weights = total/sum(total)
+
+        drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
+        self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
        
         server_sd = copy.deepcopy(server.state_dict())
         agg_state = {}
@@ -379,8 +381,7 @@ class FedAvg(FedMethod):
 
         server.load_state_dict(agg_state)
         
-        drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
-        self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
+        
 
     def evaluate_round(self, server: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()
