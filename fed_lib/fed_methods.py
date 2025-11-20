@@ -254,17 +254,15 @@ class FedSGD(FedMethod):
 
 
 class FedAvg(FedMethod):
-    def __init__(self, local_epochs: int = 5, num_steps: int=32,
+    def __init__(self, local_epochs: int = 5, num_steps_per_epoch: int=32,
                  client_weights: Optional[Sequence[float]] = None,
                  sample_fraction: float = 1.0):
         super().__init__()
         self.local_epochs = local_epochs
-        # self.minibatch = minibatch
-        self.num_steps = num_steps
+        self.num_steps_per_epoch = num_steps_per_epoch
         self.client_weights = None if client_weights is None else list(client_weights)
         self.sample_fraction = sample_fraction
-        print(local_epochs)
-        print(num_steps)
+       
 
         self.round_metrics = {
             'fed_test_acc': [],
@@ -295,7 +293,7 @@ class FedAvg(FedMethod):
         optimizer = torch.optim.SGD(client.parameters(), lr=lr)
         total_loss = 0
         counter = 0
-        step = np.ceil(len(dataloader)/self.num_steps)
+        step = np.ceil(len(dataloader)/self.num_steps_per_epoch)
         step = max(1, step)
       
         optimizer.zero_grad(set_to_none=True)
@@ -311,15 +309,13 @@ class FedAvg(FedMethod):
                 scaled_loss = loss * inputs.size(0)
                 total_loss += scaled_loss.item()
                 scaled_loss.backward()
-                # total_samples += inputs.size(0)
-                
+             
                 if ((counter % step) == 0) or (batch_idx+1)==len(dataloader): 
-                    # self.debug_output(client)
                     optimizer.step()
                     optimizer.zero_grad()
                     
 
-        return total_samples
+        return total_samples*self.local_epochs
 
     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN],
                          client_dataloaders: List[DataLoader], **kwargs):
