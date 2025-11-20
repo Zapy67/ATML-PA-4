@@ -315,7 +315,7 @@ class FedAvg(FedMethod):
                 scaled_loss = loss * inputs.size(0)
                 total_loss += scaled_loss.item()
                 scaled_loss.backward()
-                total_samples += inputs.size(0)
+                # total_samples += inputs.size(0)
                 
                 if ((counter % step) == 0) or (batch_idx+1)==len(dataloader): 
                     self.debug_output(client)
