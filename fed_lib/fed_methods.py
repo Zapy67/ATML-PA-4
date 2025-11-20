@@ -552,283 +552,75 @@ class FedGH(FedAvg):
         drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
         self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
 
+class FedProx(FedAvg):
+    """
+        Implementation of the FedProx algorithm (Li et al., MLSys 2020).
+
+        FedProx extends FedAvg by adding a proximal term to each client's local
+        objective, penalizing deviation from the global model parameters. This
+        stabilizes training and improves convergence under heterogeneous (non-IID)
+        client data distributions. When μ = 0, FedProx reduces to FedAvg.
+    """
+
+    def __init__(self, local_epochs: int = 5, aggregation_steps: int=32,
+                 client_weights: Optional[Sequence[float]] = None,
+                 sample_fraction: float = 1.0, mu: float = 0.5):
         
-
-
-
-# class FedProx(FedMethod):
-#     """
-#         Implementation of the FedProx algorithm (Li et al., MLSys 2020).
-
-#         FedProx extends FedAvg by adding a proximal term to each client's local
-#         objective, penalizing deviation from the global model parameters. This
-#         stabilizes training and improves convergence under heterogeneous (non-IID)
-#         client data distributions. When μ = 0, FedProx reduces to FedAvg.
-#     """
-
-#     def __init__(self, client_weights: Optional[Sequence[float]] = None, local_rounds: int = 5):
-#         super().__init__()
-#         self.client_weights = None if client_weights is None else list(client_weights)
-#         self.K = local_rounds
-
-#         # Track metrics
-#         self.round_metrics = {
-#             'fed_test_acc': [],
-#             'fed_test_loss': [],
-#             'central_test_acc': [],
-#             'central_test_loss': [],
-#             'client_drift': [],
-#             'param_difference': []
-#         }
-
-#     def _normalize_weights(self, n_clients: int, client_sizes: Optional[List[int]] = None) -> List[float]:
-#         if client_sizes is not None:
-#             total_size = sum(client_sizes)
-#             if total_size > 0:
-#                 return [size / total_size for size in client_sizes]
-
-#         if self.client_weights is not None:
-#             if len(self.client_weights) != n_clients:
-#                 raise ValueError("Length of client_weights must equal number of clients.")
-#             w = [float(x) for x in self.client_weights]
-#             s = sum(w)
-#             if s <= 0.0:
-#                 raise ValueError("Sum of client_weights must be positive.")
-#             return [x / s for x in w]
-
-#         # Fallback: equal weights
-#         return [1.0 / n_clients] * n_clients
-
-#     def exec_server_round(self, clients: List[SmallCNN], server: SmallCNN, **kwargs):
-#         """
-#         Execute one federated SGD round: average client gradients (weighted) and update server params.
-
-#         Args:
-#             clients: list of SmallCNNs trained for one epoch.
-#             server: the server model (nn.Module) whose parameters will be updated.
-#         """
-
-#         n_clients = len(clients)
-#         verbose = kwargs.get('verbose', False)
-#         device = kwargs.get('device', None)
-
-#         if n_clients == 0:
-#             raise ValueError("clients must contain at least one model.")
+        super().__init__(local_epochs, aggregation_steps,
+                 client_weights ,
+                 sample_fraction)
         
-#         # normalize weights
-#         weights = self._normalize_weights(n_clients)
+        self.mu = mu
 
-#         print("Applying FedProx on Server (parameter averaging)")
-#         if verbose:
-#             print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
+    def _train_client_local(self, client: SmallCNN, dataloader: DataLoader, 
+                           criterion: nn.CrossEntropyLoss, lr: float, device: torch.device) -> int:
+        client.to(device)
+        client.train()
 
-#         if device is None:
-#             try:
-#                 server_device = next(server.parameters()).device
-#             except StopIteration:
-#                 server_device = torch.device('cpu')
-#         else:
-#             server_device = device
+        n_batches = len(dataloader)
+        step = np.ceil(n_batches/self.aggregation_steps)
+        step = max(1, step)
+        optimizer = torch.optim.SGD(client.parameters(), lr=lr)
+        optimizer.zero_grad(set_to_none=True)
+        total_loss_accumulated = 0.0
+        buffer = list()
 
-#         with torch.no_grad():
-#             server_sd_before = copy.deepcopy({k: v.detach().clone().to(server_device)
-#                             for k, v in server.state_dict().items() if torch.is_tensor(v)})
+        theta_global = [p.detach().clone().to(device) for p in client.parameters()]
 
-#             averaged_sd = {}
-#             for key, server_val in server.state_dict().items():
-#                 # If value isn't a tensor, just copy server's
-#                 if not torch.is_tensor(server_val):
-#                     averaged_sd[key] = server_val
-#                     continue
-            
-#                 agg = None
-#                 for client, w in zip(clients, weights):
-#                     client_sd = client.state_dict()
-#                     client_val = client_sd[key]
-#                     if not torch.is_tensor(client_val):
-#                         # if client doesn't have a tensor at this key -> fallback to server_val
-#                         agg = server_val.detach().clone().to(server_device)
-#                         break
+        def forward_pass():
+            total_loss = 0.0
+            loss = torch.zeros(1, device=device)
+            n_samples = sum(inputs.size(0) for inputs, _ in buffer)
+            optimizer.zero_grad(set_to_none=True)
+            for inputs, targets in buffer:
+                inputs, targets = inputs.to(device), targets.to(device)
+                predictions = client(inputs) 
+                # loss = criterion(predictions, targets) * inputs.size(0) / n_samples
+                loss += criterion(predictions, targets) * inputs.size(0) / n_samples
+                # loss.backward()
+                # total_loss += loss.item() * n_samples
 
-#                     # Move client's tensor to server device for accumulation
-#                     t = client_val.detach().to(server_device)
-#                     weighted = t.mul(w)  # same dtype/device as t
-#                     agg = weighted.clone() if agg is None else agg.add_(weighted)
+            # return total_loss
+            return loss
+        
+        for batch_idx, batch in enumerate(dataloader):  
+            buffer.append(batch)
+            if len(buffer) == step or (batch_idx+1) == len(dataloader): 
 
-#                 # If no clients contributed (shouldn't happen), fallback to server's current value
-#                 if agg is None:
-#                     agg = server_val.detach().clone().to(server_device)
+                loss: torch.Tensor = forward_pass()
 
-#                 averaged_sd[key] = agg
+                # WIP
+                proximal_term = torch.zeros(1, device=device)
+                for p, p_g in zip(client.parameters(), theta_global):
+                    proximal_term += self.mu / 2 * (p - p_g).pow(2).sum()
 
-#             # Load averaged parameters/buffers into the server
-#             # ensure server is on server_device
-#             server.to(server_device)
-#             server.load_state_dict(averaged_sd)
-
-#             # Debug: compute total L2 change (||theta_new - theta_old||) and norm of new params
-#             total_change_sq = 0.0
-#             total_norm_sq = 0.0
-#             for k, new_val in averaged_sd.items():
-#                 if not torch.is_tensor(new_val):
-#                     continue
-#                 old_val = server_sd_before.get(k)
-#                 if old_val is None:
-#                     continue
-#                 diff = new_val - old_val
-#                 total_change_sq += float(torch.norm(diff).pow(2).item())
-#                 total_norm_sq += float(torch.norm(new_val).pow(2).item())
-
-#             total_change = total_change_sq ** 0.5
-#             agg_norm = total_norm_sq ** 0.5
-
-#             if verbose:
-#                 print(f"  Server parameter L2-change: {total_change:.6f}")
-#                 print(f"  Aggregated parameter L2-norm: {agg_norm:.6f}")
-
-#     def _train_client(self, server: SmallCNN, client: SmallCNN, dataloader: DataLoader, criterion: nn.CrossEntropyLoss, device, **kwargs):
-#         client.to(device)
-#         client.train()
-
-#         learning_rate = kwargs.get('lr', 0.001)
-#         momentum = kwargs.get('momentum', 0)
-#         weight_decay = kwargs.get('weight_decay', 0)
-#         rounds = kwargs.get('rounds', self.K)
-
-#         mu = kwargs.get('mu', 0.01)
-#         theta_global = [p.detach().clone().to(device) for p in server.parameters()]
-
-#         optimizer = torch.optim.SGD(client.parameters(), lr=learning_rate, 
-#             momentum=momentum, 
-#             weight_decay=weight_decay)
-
-#         num_steps = 0
-#         counter = 0
-#         batch_steps = max(1, int(len(dataloader)/ self.K))
-#         leftover = len(dataloader) - batch_steps * self.K
-#         curr_samples = 0.0
-
-#         optimizer.zero_grad(set_to_none=True)
-            
-#         total_samples = 0.0
-#         total_loss= 0.0
-
-#         for batch in dataloader:
-#             counter +=1
-
-#             inputs, targets = batch
-#             inputs, targets = inputs.to(device), targets.to(device)
-
-#             out = client(inputs)
-#             loss = criterion(out, targets)
-            
-#             batch_size = inputs.size(0)
-#             scaled_loss = loss * batch_size
-#             scaled_loss.backward()
-
-#             total_loss += loss.item() * batch_size
-#             curr_samples += inputs.size(0)
-#             total_samples += inputs.size(0)
-                                                    
-#             if counter == (batch_steps + (1 if num_steps < leftover else 0)):
-                
-#                 if curr_samples > 0:
-#                     with torch.no_grad():
-#                         for p in client.parameters():
-#                             if p.grad is not None:
-#                                 p.grad.div_(curr_samples)
-#                         # Prox Term
-#                         for p, p_g in zip(client.parameters(), theta_global):
-#                             prox = mu * (p.detach() - p_g)
-#                             if p.grad is None:
-#                                 p.grad = prox.clone()
-#                             else:
-#                                 p.grad.add_(prox)
-
-#                     curr_samples = 0.0
-
-#                 optimizer.step()
-#                 optimizer.zero_grad(set_to_none=True)
-#                 counter = 0
-#                 num_steps += 1
-#                 if leftover > 0: leftover -= 1
-
-#         if num_steps < rounds:
-#             if curr_samples > 0:
-#                 with torch.no_grad():
-#                     for p in client.parameters():
-#                         if p.grad is not None:
-#                             p.grad.div_(curr_samples)
-#                     # Prox Term
-#                     for p, p_g in zip(client.parameters(), theta_global):
-#                         prox = mu * (p.detach() - p_g)
-#                         if p.grad is None:
-#                             p.grad = prox.clone()
-#                         else:
-#                             p.grad.add_(prox)
-#                 curr_samples = 0.0
-#             optimizer.step()
-#             optimizer.zero_grad(set_to_none=True)
-
-#         if total_samples == 0:
-#             return 0, 0.0
-
-#         avg_loss = total_loss / total_samples
-
-#         return total_samples, avg_loss
-
-#     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN], client_dataloaders: List[DataLoader], **kwargs):
-
-#         device = kwargs['device']
-#         verbose = kwargs['verbose']
-#         rounds = kwargs['rounds']
-
-#         criterion = nn.CrossEntropyLoss()
-
-#         client_sizes = []
-
-#         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
-#             print(f"Training Client {i+1}/{len(clients)}")
-
-#             client.load_state_dict(copy.deepcopy(server.state_dict()))
-#             n_samples, avg_loss = self._train_client(server, client, loader, criterion, device, **kwargs)
-
-#             client_sizes.append(n_samples)
-
-#             # Debug: print gradient norm
-#             if verbose:
-#                 all_grads = [p.grad.detach().flatten() for p in client.parameters() 
-#                             if p.grad is not None]
-#                 if all_grads:
-#                     grad_vec = torch.cat(all_grads)
-#                     grad_norm = float(torch.norm(grad_vec))
-#                     print(f"  Client {i+1}: samples={n_samples}, loss={avg_loss:.4f}, "
-#                             f"grad_norm={grad_norm:.4f}")
-#                 else:
-#                     print(f"  Client {i+1}: No gradients computed!")
-
-#         kwargs['client_sizes'] = client_sizes
-
-
-#     def evaluate_round(self, server: SmallCNN, central: SmallCNN, **kwargs):
-#         criterion = nn.CrossEntropyLoss()
-#         device = kwargs['device']
-#         test_loader = kwargs['test_loader']
-
-#         server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
-#         central_loss, central_acc = evaluate_model_on_test(central, test_loader, criterion, device)
-
-#         self.round_metrics['fed_test_acc'].append(server_acc)
-#         self.round_metrics['fed_test_loss'].append(server_loss)
-#         self.round_metrics['central_test_acc'].append(central_acc)
-#         self.round_metrics['central_test_loss'].append(central_loss)
-#         param_diff = compute_model_difference(server, central, norm_type='l2')
-#         self.round_metrics['param_difference'].append(param_diff)
-
-#         print(f"FedProx  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
-#         print(f"Central | Test Loss: {central_loss:.4f}, Test Acc: {central_acc*100:.2f}%")
-
-#     def evaluate_server(self, server: SmallCNN, central: SmallCNN, **kwargs):
-#         self.evaluate_round(server, central, **kwargs)
-
-
+                loss += proximal_term
+                loss.backward()
+                optimizer.step()
+                # total_loss_accumulated += loss + proximal_term.item()
+                total_loss_accumulated += loss.item()
+                buffer.clear()
+        
+        total_samples_processed = len(dataloader.dataset.indices)
+        average_loss = total_loss_accumulated / total_samples_processed
+        return total_samples_processed, average_loss
