@@ -263,6 +263,8 @@ class FedAvg(FedMethod):
         self.num_steps = num_steps
         self.client_weights = None if client_weights is None else list(client_weights)
         self.sample_fraction = sample_fraction
+        print(local_epochs)
+        print(num_steps)
 
         self.round_metrics = {
             'fed_test_acc': [],
@@ -276,6 +278,14 @@ class FedAvg(FedMethod):
             random.seed(seed)
         return random.sample(range(n_clients), n_sample)
     
+    def debug_output(self, model):
+        with torch.no_grad():
+            params = [param.detach().flatten() for param in model.parameters() 
+                                        if param is not None]
+            if params:
+                param_vector = torch.cat(params)
+                print(f"Aggregated server grad_norm: {torch.norm(param_vector).item():.4f}")
+    
 
     def _train_client_local(self, client: SmallCNN, dataloader: DataLoader,
                            criterion: nn.CrossEntropyLoss, lr: float, device: torch.device) -> int:
@@ -286,7 +296,7 @@ class FedAvg(FedMethod):
         total_samples = 0
         counter = 0
         step = np.ceil(len(dataloader)/self.num_steps)
-        step = min(1, step)
+        step = max(1, step)
       
         optimizer.zero_grad(set_to_none=True)
 
@@ -303,11 +313,12 @@ class FedAvg(FedMethod):
                 scaled_loss.backward()
                 total_samples += inputs.size(0)
                 
-                if counter % step == 0 or (batch_idx+1)==len(dataloader): 
-                    print("Optimized")
+                if ((counter % step) == 0) or (batch_idx+1)==len(dataloader): 
+                    self.debug_output(client)
                     optimizer.step()
                     optimizer.zero_grad()
-            
+                    
+
         return total_samples
 
     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN],
