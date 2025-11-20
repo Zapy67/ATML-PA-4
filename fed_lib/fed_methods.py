@@ -300,6 +300,8 @@ class FedAvg(FedMethod):
       
         optimizer.zero_grad(set_to_none=True)
 
+        def normalize_grad(list[tensor])
+
         for epoch in range(self.local_epochs):
             counter=0
             for batch_idx, (inputs, targets) in enumerate(dataloader):
@@ -308,7 +310,7 @@ class FedAvg(FedMethod):
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = client(inputs)
                 loss = criterion(outputs, targets)
-                scaled_loss = loss * inputs.size(0)
+                scaled_loss = loss 
                 total_loss += scaled_loss.item()
                 scaled_loss.backward()
                 total_samples += inputs.size(0)
