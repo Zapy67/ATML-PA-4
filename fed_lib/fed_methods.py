@@ -311,7 +311,7 @@ class FedAvg(FedMethod):
         total_loss = 0
         total_samples = 0
         counter = 0
-        step = np.floor(len(dataloader)/self.num_steps)
+        step = np.ceil(len(dataloader)/self.num_steps)
         step = min(1, step)
       
         optimizer.zero_grad(set_to_none=True)
