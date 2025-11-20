@@ -123,21 +123,21 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
     running_correct = 0
     running_total = 0
 
+    total_samples = sum(inputs.size(0) for inputs, _ in train_loader)
+
     pbar = tqdm.tqdm(train_loader, desc="Train", leave=False)
     for batch in pbar:
         inputs, targets = batch
         inputs: torch.Tensor = inputs.to(device, non_blocking=True)
         targets: torch.Tensor = targets.to(device, non_blocking=True)
         
-        outputs: torch.Tensor = model(inputs)
-        loss: torch.Tensor = criterion(outputs, targets)
-        
-        batch_size = inputs.size(0)
-        scaled_loss = loss * batch_size
-        scaled_loss.backward()
+        outputs: torch.Tensor = model(inputs)        
+        loss: torch.Tensor = criterion(outputs, targets) * inputs.size(0) / total_samples
+            
+        loss.backward()
         
         # bookkeeping
-        running_loss += loss.item() * inputs.size(0)
+        running_loss += loss.item() * total_samples
         _, preds = torch.max(outputs, dim=1)
         running_correct += (preds == targets).sum().item()
         running_total += inputs.size(0)
@@ -148,11 +148,6 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
         pbar.set_postfix({'loss': f"{avg_loss:.4f}", 'acc': f"{avg_acc:.4f}"})
 
     if running_total > 0:
-        with torch.no_grad():
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.div_(running_total)
-        
         # Debug
         if verbose:
             all_grads = [p.grad.detach().flatten() for p in model.parameters() 
@@ -163,11 +158,9 @@ def train_model_one_epoch(model: SmallCNN, train_loader: DataLoader, criterion: 
 
     # Update once
     optimizer.step()
+    optimizer.zero_grad()
 
-    avg_loss = running_loss / running_total if running_total > 0 else 0.0
-    accuracy = running_correct / running_total if running_total > 0 else 0.0
-
-    return avg_loss, accuracy
+    return avg_loss, avg_acc
 
 def model_one_epoch_losses(model: SmallCNN, train_loader: DataLoader, criterion: nn.CrossEntropyLoss, device: torch.device):
     """

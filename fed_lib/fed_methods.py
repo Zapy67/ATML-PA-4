@@ -175,23 +175,20 @@ class FedSGD(FedMethod):
         client.train()
 
         optimizer.zero_grad(set_to_none=True)
-        
-        total_samples = 0.0
+
         total_loss= 0.0
+        total_samples = sum(inputs.size(0) for inputs, _ in dataloader)
 
         for batch_idx, batch in enumerate(dataloader):
             inputs, targets = batch
             inputs, targets = inputs.to(device), targets.to(device)
 
             out = client(inputs)
-            loss = criterion(out, targets)
+            loss = criterion(out, targets) * inputs.size(0) / total_samples
             
-            batch_size = inputs.size(0)
-            scaled_loss = loss * batch_size
-            scaled_loss.backward()
+            loss.backward()
 
-            total_loss += loss.item() * batch_size
-            total_samples += inputs.size(0)
+            total_loss += loss.item() * total_samples
             if (batch_idx+1)==len(dataloader): 
                     print("Optimized")
                     optimizer.step()
@@ -381,8 +378,6 @@ class FedAvg(FedMethod):
                     agg_state[k] += src * float(weight)
 
         server.load_state_dict(agg_state)
-        
-        
 
     def evaluate_round(self, server: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()
@@ -470,8 +465,15 @@ class FedSAM(FedAvg):
         total_samples_processed = len(dataloader.dataset.indices)
         average_loss = total_loss_accumulated / total_samples_processed
         return total_samples_processed, average_loss
-
     
+    def evaluate_round(self, server: SmallCNN, **kwargs):
+        criterion = nn.CrossEntropyLoss()
+        device = kwargs['device']
+        test_loader = kwargs['test_loader']
+        server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
+        self.round_metrics['fed_test_acc'].append(server_acc)
+        self.round_metrics['fed_test_loss'].append(server_loss)
+        print(f"FedSAM  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
 
 class FedGH(FedAvg):
     def __init__(self, 
@@ -552,6 +554,15 @@ class FedGH(FedAvg):
         drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
         self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
 
+    def evaluate_round(self, server: SmallCNN, **kwargs):
+        criterion = nn.CrossEntropyLoss()
+        device = kwargs['device']
+        test_loader = kwargs['test_loader']
+        server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
+        self.round_metrics['fed_test_acc'].append(server_acc)
+        self.round_metrics['fed_test_loss'].append(server_loss)
+        print(f"FedGH  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
+
 class FedProx(FedAvg):
     """
         Implementation of the FedProx algorithm (Li et al., MLSys 2020).
@@ -624,3 +635,12 @@ class FedProx(FedAvg):
         total_samples_processed = len(dataloader.dataset.indices)
         average_loss = total_loss_accumulated / total_samples_processed
         return total_samples_processed, average_loss
+    
+    def evaluate_round(self, server: SmallCNN, **kwargs):
+        criterion = nn.CrossEntropyLoss()
+        device = kwargs['device']
+        test_loader = kwargs['test_loader']
+        server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
+        self.round_metrics['fed_test_acc'].append(server_acc)
+        self.round_metrics['fed_test_loss'].append(server_loss)
+        print(f"FedProx  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
