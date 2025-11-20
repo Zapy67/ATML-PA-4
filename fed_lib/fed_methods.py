@@ -311,7 +311,6 @@ class FedAvg(FedMethod):
                 scaled_loss.backward()
              
                 if ((counter % step) == 0) or (batch_idx+1)==len(dataloader): 
-                    print("Step")
                     optimizer.step()
                     optimizer.zero_grad()
                     
