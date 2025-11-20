@@ -404,6 +404,7 @@ class FedSAM(FedAvg):
     def __init__(self, local_epochs: int = 5, aggregation_steps: int=32,
                  client_weights: Optional[Sequence[float]] = None,
                  sample_fraction: float = 1.0, rho: float=1e-3):
+        
         super().__init__(local_epochs, aggregation_steps,
                  client_weights ,
                  sample_fraction)
