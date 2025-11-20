@@ -86,7 +86,6 @@ class FedSGD(FedMethod):
         super().__init__()
         self.client_weights = None if client_weights is None else list(client_weights)
 
-        # Track metrics
         self.round_metrics = {
             'fed_test_acc': [],
             'fed_test_loss': [],
@@ -101,7 +100,6 @@ class FedSGD(FedMethod):
             total_size = sum(client_sizes)
             if total_size > 0:
                 return [size / total_size for size in client_sizes]
-            # If total_size is 0, fallback to equal weights
 
         if self.client_weights is not None:
             if len(self.client_weights) != n_clients:
@@ -112,18 +110,10 @@ class FedSGD(FedMethod):
                 raise ValueError("Sum of client_weights must be positive.")
             return [x / s for x in w]
 
-        # Fallback: equal weights
         return [1.0 / n_clients] * n_clients
 
     def exec_server_round(self, clients: List[SmallCNN], server: SmallCNN, **kwargs):
-        """
-        Execute one federated SGD round: average client gradients (weighted) and update server params.
-
-        Args:
-            clients: list of SmallCNNs trained for one epoch.
-            server: the server model (nn.Module) whose parameters will be updated.
-        """
-
+       
         n_clients = len(clients)
         verbose = kwargs['verbose']
         client_sizes = kwargs.get('client_sizes')
@@ -131,46 +121,35 @@ class FedSGD(FedMethod):
         if n_clients == 0:
             raise ValueError("clients must contain at least one model.")
         
-        # normalize weights
         weights = self._normalize_weights(n_clients, client_sizes)
-
-        # server_optimizer: torch.optim.SGD = kwargs['server_optimizer']
-
         print("Applying FedSGD on Server")
         if verbose:
             print(f"Aggregating {n_clients} clients with weights: {[f'{w:.3f}' for w in weights]}")
 
-        server_sd = server.state_dict()
+        server_sd = copy.deepcopy(server.state_dict())
         agg_state_dict = {}
 
-        # Make zeroed clones for float tensors, clone (unchanged) for others.
         for k, v in server_sd.items():
             if torch.is_floating_point(v):
                 agg_state_dict[k] = v.clone().zero_()
             else:
-                # keep a clone of non-float buffers (int64, bool, etc.)
                 agg_state_dict[k] = v.clone()
 
         with torch.no_grad():
             for client, weight in zip(clients, weights):
                 client_sd = client.state_dict()
                 for k in agg_state_dict.keys():
-                    # Only aggregate floating tensors
                     if not torch.is_floating_point(agg_state_dict[k]):
-                        continue
-
-                    # Move client's tensor to same device/dtype as agg tensor
+                        continue                   
                     src = client_sd[k]
                     if src.device != agg_state_dict[k].device:
                         src = src.to(agg_state_dict[k].device)
-                    # ensure float dtype (should be float, but cast to be safe)
+                    
                     if src.dtype != agg_state_dict[k].dtype:
                         src = src.to(dtype=agg_state_dict[k].dtype)
 
-                    # weight is python float -> multiply directly
                     agg_state_dict[k] += src * float(weight)
-
-        # Load aggregated state into server (non-float keys come from server clones)
+    
         server.load_state_dict(agg_state_dict)
 
 
@@ -200,7 +179,7 @@ class FedSGD(FedMethod):
         total_samples = 0.0
         total_loss= 0.0
 
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
             inputs, targets = batch
             inputs, targets = inputs.to(device), targets.to(device)
 
@@ -213,29 +192,24 @@ class FedSGD(FedMethod):
 
             total_loss += loss.item() * batch_size
             total_samples += inputs.size(0)
-        
-        if total_samples == 0:
-            return 0, 0.0
-        
-        optimizer.step()
+            if (batch_idx+1)==len(dataloader): 
+                    print("Optimized")
+                    optimizer.step()
+                    optimizer.zero_grad()
         
         avg_loss = total_loss / total_samples
 
         return total_samples, avg_loss
 
     def exec_client_round(self, server: SmallCNN, clients: List[SmallCNN], client_dataloaders: List[DataLoader], **kwargs):
-
         device = kwargs['device']
         verbose = kwargs['verbose']
         lr = kwargs.get('lr', 1e-3)
-
         criterion = nn.CrossEntropyLoss()
-
         client_sizes = []
 
         for i, (client, loader) in enumerate(zip(clients, client_dataloaders)):
             print(f"Training Client {i+1}/{len(clients)}")
-
             params = copy.deepcopy(server.state_dict())
             client.load_state_dict(params)
             optimizer = torch.optim.SGD(client.parameters(), lr=lr)
@@ -244,16 +218,16 @@ class FedSGD(FedMethod):
             client_sizes.append(n_samples)
 
             # Debug: print gradient norm
-            if verbose:
-                all_grads = [p.grad.detach().flatten() for p in client.parameters() 
-                            if p.grad is not None]
-                if all_grads:
-                    grad_vec = torch.cat(all_grads)
-                    grad_norm = float(torch.norm(grad_vec))
-                    print(f"  Client {i+1}: samples={n_samples}, loss={avg_loss:.4f}, "
-                            f"grad_norm={grad_norm:.4f}")
-                else:
-                    print(f"  Client {i+1}: No gradients computed!")
+            # if verbose:
+            #     all_grads = [p.grad.detach().flatten() for p in client.parameters() 
+            #                 if p.grad is not None]
+            #     if all_grads:
+            #         grad_vec = torch.cat(all_grads)
+            #         grad_norm = float(torch.norm(grad_vec))
+            #         print(f"  Client {i+1}: samples={n_samples}, loss={avg_loss:.4f}, "
+            #                 f"grad_norm={grad_norm:.4f}")
+            #     else:
+            #         print(f"  Client {i+1}: No gradients computed!")
 
         kwargs['client_sizes'] = client_sizes
 
@@ -320,6 +294,7 @@ class FedAvg(FedMethod):
             counter=0
             for batch_idx, (inputs, targets) in enumerate(dataloader):
                 counter +=1
+                
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = client(inputs)
                 loss = criterion(outputs, targets)
@@ -329,6 +304,7 @@ class FedAvg(FedMethod):
                 total_samples += inputs.size(0)
                 
                 if counter % step == 0 or (batch_idx+1)==len(dataloader): 
+                    print("Optimized")
                     optimizer.step()
                     optimizer.zero_grad()
             
@@ -435,27 +411,64 @@ class FedSAM(FedAvg):
         client.train()
         optimizer = torch.optim.SGD(client.parameters(), lr=lr)
         total_samples = 0
-        total_loss = 0
-        total_samples = 0
         num_steps = np.floor(self.minibatch/dataloader.batch_size)
         num_steps = max(1, num_steps)
         counter = 0
+        buffer = list()
       
         optimizer.zero_grad(set_to_none=True)
 
         for batch_idx, (inputs, targets) in enumerate(dataloader):
-            counter +=1
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = client(inputs)
-            loss = criterion(outputs, targets)
-            scaled_loss = loss * inputs.size(0)
-            total_loss += scaled_loss.item()
-            scaled_loss.backward()
-            total_samples += inputs.size(0)
+            # counter +=1
+            # inputs, targets = inputs.to(device), targets.to(device)
+            # outputs = client(inputs)
+            # loss = criterion(outputs, targets)
+            # scaled_loss = loss * inputs.size(0)
+            # total_loss += scaled_loss.item()
+            # scaled_loss.backward()
+            # total_samples += inputs.size(0)
             
+            # if counter % num_steps == 0 or (batch_idx+1)==len(dataloader): 
+            #      optimizer.step()
+            #      optimizer.zero_grad(set_to_none=True)
+
+            batch_inputs, batch_targets = data_batch
+            batch_inputs, batch_targets = batch_inputs.to(device), batch_targets.to(device)
+
             if counter % num_steps == 0 or (batch_idx+1)==len(dataloader): 
-                 optimizer.step()
-                 optimizer.zero_grad(set_to_none=True)
+                def calculate_gradients_closure():
+                    optimizer.zero_grad(set_to_none=True)
+                    predictions = client(batch_inputs) 
+                    loss = criterion(predictions, batch_targets)
+                    loss.backward()
+                    return loss
+                
+                original_params = [param.clone() for param in local_model.parameters()]
+                
+                calculate_gradients_closure()
+            
+                norm = 0.0
+                for model_param in local_model.parameters():
+                    if model_param.grad is not None:
+                        grad = model_param.grad
+                        norm += torch.sum(grad * grad)
+                
+                scale = self.rho / (torch.sqrt(norm) + 1e-12)
+
+                with torch.no_grad():
+                    for model_param in local_model.parameters():
+                        if model_param.grad is not None:
+                            model_param.add_(model_param.grad * scale)
+                
+                loss = calculate_gradients_closure()
+        
+                with torch.no_grad():
+                    for model_param, original_p in zip(local_model.parameters(), original_params):
+                        model_param.copy_(original_p)
+                
+                local_optimizer.step()
+                total_loss_accumulated += loss.item()
+                total_samples_processed += batch_inputs.size(0)
             
         return total_samples
     
