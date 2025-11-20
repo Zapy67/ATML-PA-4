@@ -41,7 +41,7 @@ Usage Example:
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from typing import List, Optional, Sequence, Dict
 from fed_lib.utils import (
     SmallCNN,
@@ -291,16 +291,18 @@ class FedAvg(FedMethod):
                            criterion: nn.CrossEntropyLoss, lr: float, device: torch.device) -> int:
         client.to(device)
         client.train()
-        optimizer = torch.optim.SGD(client.parameters(), lr=lr)
+        total_samples = len(dataloader.dataset.indices)
+        optimizer = torch.optim.SGD(client.parameters(), lr=lr/total_samples)
         total_loss = 0
-        total_samples = 0
+       
+        print(total_samples)
         counter = 0
         step = np.ceil(len(dataloader)/self.num_steps)
         step = max(1, step)
       
         optimizer.zero_grad(set_to_none=True)
 
-        # def normalize_grad(list[tensor])
+        
 
         for epoch in range(self.local_epochs):
             counter=0
@@ -310,7 +312,7 @@ class FedAvg(FedMethod):
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = client(inputs)
                 loss = criterion(outputs, targets)
-                scaled_loss = loss 
+                scaled_loss = loss * inputs.size(0)
                 total_loss += scaled_loss.item()
                 scaled_loss.backward()
                 total_samples += inputs.size(0)
