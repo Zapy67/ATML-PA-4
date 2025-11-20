@@ -290,11 +290,12 @@ class FedAvg(FedMethod):
         client.to(device)
         client.train()
         n_samples = len(dataloader.dataset.indices)
+        n_batches = len(dataloader)
         total_loss = 0
-        step = np.ceil(len(dataloader)/self.aggregation_steps)
+        step = np.ceil(n_batches/self.aggregation_steps)
         step = max(1, step)
 
-        optimizer = torch.optim.SGD(client.parameters(), lr=lr*self.aggregation_steps/ n_samples)
+        optimizer = torch.optim.SGD(client.parameters(), lr=lr*min(self.aggregation_steps,n_batches)/ n_samples)
       
         optimizer.zero_grad(set_to_none=True)
 
