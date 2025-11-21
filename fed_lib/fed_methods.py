@@ -261,6 +261,7 @@ class FedAvg(FedMethod):
         self.aggregation_steps = aggregation_steps
         self.client_weights = None if client_weights is None else list(client_weights)
         self.sample_fraction = sample_fraction
+        self.selected_indices = None
        
 
         self.round_metrics = {
@@ -346,9 +347,12 @@ class FedAvg(FedMethod):
         
         kwargs['client_sizes'] = client_sizes
         kwargs['selected_indices'] = selected_indices
+        self.selected_indices = selected_indices
 
     def exec_server_round(self, clients: List[SmallCNN], server: SmallCNN, **kwargs):
         selected_indices = kwargs.get('selected_indices', list(range(len(clients))))
+        if self.selected_indices is not None:
+            selected_indices = self.selected_indices
         n_selected = len(selected_indices)
         total = np.array([self.client_weights[idx] for idx in selected_indices])
         weights = total/sum(total)
@@ -381,6 +385,7 @@ class FedAvg(FedMethod):
                     agg_state[k] += src * float(weight)
 
         server.load_state_dict(agg_state)
+        self.selected_indices = None
         
         
 
@@ -527,6 +532,9 @@ class FedGH(FedAvg):
     
         selected_indices = kwargs.get('selected_indices', list(range(len(clients))))
         n_selected = len(selected_indices)
+        selected_clients = [clients[client_idx] for client_idx in selected_indices]
+        drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
+        self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
 
         server_flat = self._get_flat_params(server)
         pseudo_gradients = []
@@ -548,9 +556,7 @@ class FedGH(FedAvg):
         new_server_params = server_flat - accumulated_grad
         self._set_flat_params(server, new_server_params)
 
-        selected_clients = [clients[client_idx] for client_idx in selected_indices]
-        drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
-        self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
+        
 
         
 
