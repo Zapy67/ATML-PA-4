@@ -614,7 +614,7 @@ class FedProx(FedAvg):
             for inputs, targets in buffer:
                 inputs, targets = inputs.to(device), targets.to(device)
                 predictions = client(inputs) 
-                loss: torch.Tensor = criterion(predictions, targets) * inputs.size(0) / n_samples
+                # loss: torch.Tensor = criterion(predictions, targets) * inputs.size(0) / n_samples
                 loss += criterion(predictions, targets) * inputs.size(0) / n_samples
                 # loss.backward()
                 # total_loss += loss.item() * n_samples
