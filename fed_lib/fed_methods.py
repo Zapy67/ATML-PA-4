@@ -600,19 +600,19 @@ class FedProx(FedAvg):
 
         def forward_pass():
             total_loss = 0.0
-            loss = torch.zeros(1, device=device)
+            # loss = torch.zeros(1, device=device)
             n_samples = sum(inputs.size(0) for inputs, _ in buffer)
             optimizer.zero_grad(set_to_none=True)
             for inputs, targets in buffer:
                 inputs, targets = inputs.to(device), targets.to(device)
                 predictions = client(inputs) 
-                # loss = criterion(predictions, targets) * inputs.size(0) / n_samples
-                loss += criterion(predictions, targets) * inputs.size(0) / n_samples
-                # loss.backward()
-                # total_loss += loss.item() * n_samples
+                loss = criterion(predictions, targets) * inputs.size(0) / n_samples
+                # loss += criterion(predictions, targets) * inputs.size(0) / n_samples
+                loss.backward()
+                total_loss += loss.item() * n_samples
 
-            # return total_loss
-            return loss
+            return total_loss
+            # return loss
         
         for batch_idx, batch in enumerate(dataloader):  
             buffer.append(batch)
@@ -625,11 +625,11 @@ class FedProx(FedAvg):
                 for p, p_g in zip(client.parameters(), theta_global):
                     proximal_term += self.mu / 2 * (p - p_g).pow(2).sum()
 
-                loss += proximal_term
-                loss.backward()
+                proximal_term.backward()
+                # loss.backward()
                 optimizer.step()
                 # total_loss_accumulated += loss + proximal_term.item()
-                total_loss_accumulated += loss.item()
+                total_loss_accumulated += loss + proximal_term.item()
                 buffer.clear()
         
         total_samples_processed = len(dataloader.dataset.indices)
