@@ -334,7 +334,7 @@ class FedAvg(FedMethod):
         for idx in selected_indices:
             client = clients[idx]
             loader = client_dataloaders[idx]
-            print(f"Training Client {idx+1}/{n_clients} for {self.local_epochs} epochs")
+            print(f"Training Client {idx+1}/{n_clients} for {self.aggregation_steps} steps")
             client.load_state_dict(copy.deepcopy(server.state_dict()))
             n_samples = self._train_client_local(client, loader, criterion, lr, device)
             client_sizes.append(n_samples)
