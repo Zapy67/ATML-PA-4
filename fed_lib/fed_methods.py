@@ -503,15 +503,14 @@ class FedGH(FedAvg):
                 offset += numel
 
     def harmonize_gradients(self, grads_list: List[torch.Tensor]) -> List[torch.Tensor]:
-        
         num_clients = len(grads_list)
+        original_grads = [g.clone().detach() for g in grads_list]
         harmonized_list = [g.clone().detach() for g in grads_list]
         
         for i in range(num_clients):
             for j in range(i + 1, num_clients):
-                g_i = harmonized_list[i]
-                g_j = harmonized_list[j]
-                
+                g_i = original_grads[i]
+                g_j = original_grads[j]
                 dot = torch.dot(g_i, g_j)
                 
                 if dot < 0:
@@ -520,11 +519,11 @@ class FedGH(FedAvg):
 
                     if norm_j_sq > 1e-12: 
                         proj_i_on_j = (dot / norm_j_sq) * g_j
-                        harmonized_list[i] = g_i - proj_i_on_j 
-                   
+                        harmonized_list[i] -= proj_i_on_j 
+                    
                     if norm_i_sq > 1e-12:
                         proj_j_on_i = (dot / norm_i_sq) * g_i
-                        harmonized_list[j] = g_j - proj_j_on_i 
+                        harmonized_list[j] -= proj_j_on_i 
 
         return harmonized_list
 
@@ -559,8 +558,6 @@ class FedGH(FedAvg):
 
         new_server_params = server_flat - accumulated_grad
         self._set_flat_params(server, new_server_params)
-
-        
 
     def evaluate_round(self, server: SmallCNN, **kwargs):
         criterion = nn.CrossEntropyLoss()
