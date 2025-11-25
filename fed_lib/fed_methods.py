@@ -503,72 +503,80 @@ class FedGH(FedAvg):
                 offset += numel
 
     def harmonize_gradients(self, grads_list: List[torch.Tensor]) -> List[torch.Tensor]:
+    
         num_clients = len(grads_list)
         harmonized_list = [g.clone().detach() for g in grads_list]
-      
+        EPS = 1e-6 
+
         for i in range(num_clients):
             for j in range(i + 1, num_clients):
                 g_i = grads_list[i]
                 g_j = grads_list[j]
-                
                 dot = torch.dot(g_i, g_j)
                 
-              
                 if dot < 0:
                     norm_i_sq = torch.dot(g_i, g_i)
                     norm_j_sq = torch.dot(g_j, g_j)
                     
-                    if norm_j_sq > 1e-6 :
-                        proj_i_on_j = (dot / (norm_j_sq + 1e-6 )) * g_j
-                        harmonized_list[i] -= proj_i_on_j                     
+                    if norm_j_sq > EPS:
+                        proj_i_on_j = (dot / (norm_j_sq + EPS)) * g_j
+                        harmonized_list[i] -= proj_i_on_j                    
 
-                    if norm_i_sq > 1e-6 :
-                        proj_j_on_i = (dot / (norm_i_sq + 1e-6 )) * g_i
+                    if norm_i_sq > EPS:
+                        proj_j_on_i = (dot / (norm_i_sq + EPS)) * g_i
                         harmonized_list[j] -= proj_j_on_i 
 
         return harmonized_list
 
-    def exec_server_round(self,
-                          clients: List[nn.Module],
-                          server: nn.Module,
-                          **kwargs):
-        
-    
+    def exec_server_round(self, clients: List[nn.Module], server: nn.Module, **kwargs):
         selected_indices = kwargs.get('selected_indices', list(range(len(clients))))
         n_selected = len(selected_indices)
         selected_clients = [clients[client_idx] for client_idx in selected_indices]
-        drift_summary = calculate_client_drift_metrics(server, selected_clients ,show_top_k=n_selected, verbose=True)
+      
+        if self.client_weights is None:
+            client_sizes = kwargs.get('client_sizes', [1]*n_selected)
+            total_samples = sum(client_sizes)
+            aggregation_weights = [s/total_samples for s in client_sizes]
+        else:
+            total = np.array([self.client_weights[idx] for idx in selected_indices])
+            aggregation_weights = total/sum(total)
+
+        drift_summary = calculate_client_drift_metrics(server, selected_clients, show_top_k=n_selected, verbose=True)
         self.round_metrics['client_drift'].append(drift_summary['mean_client_drift'])
 
         server_flat = self._get_flat_params(server)
         pseudo_gradients = []
         
-        for client_idx in selected_indices:
-            client_flat = self._get_flat_params(clients[client_idx])
+        for client in selected_clients:
+            client_flat = self._get_flat_params(client)
             pseudo_grad = server_flat - client_flat
             pseudo_gradients.append(pseudo_grad)
 
-        # harmonized_grads = self.harmonize_gradients(pseudo_gradients)
-        harmonized_grads = pseudo_gradients
-        total = np.array([self.client_weights[idx] for idx in selected_indices])
-        aggregation_weights = total/sum(total)
-        
+        harmonized_grads = self.harmonize_gradients(pseudo_gradients)
+   
         accumulated_grad = torch.zeros_like(server_flat)
-        
         for weight, h_grad in zip(aggregation_weights, harmonized_grads):
             accumulated_grad += weight * h_grad
 
         new_server_params = server_flat - accumulated_grad
         self._set_flat_params(server, new_server_params)
 
-    def evaluate_round(self, server: SmallCNN, **kwargs):
-        criterion = nn.CrossEntropyLoss()
-        device = kwargs['device']
-        test_loader = kwargs['test_loader']
-        server_loss, server_acc = evaluate_model_on_test(server, test_loader, criterion, device)
-        self.round_metrics['fed_test_acc'].append(server_acc)
-        self.round_metrics['fed_test_loss'].append(server_loss)
-        print(f"FedGH  | Test Loss: {server_loss:.4f}, Test Acc: {server_acc*100:.2f}%")
+
+        server_sd = server.state_dict()
+        agg_bn_state = {}
+        for k, v in server_sd.items():
+            if not v.requires_grad and torch.is_floating_point(v):
+                agg_bn_state[k] = torch.zeros_like(v)
+        
+        if agg_bn_state:
+            with torch.no_grad():
+                for client, weight in zip(selected_clients, aggregation_weights):
+                    client_sd = client.state_dict()
+                    for k in agg_bn_state.keys():
+                        agg_bn_state[k] += client_sd[k].to(agg_bn_state[k].device) * float(weight)
+            
+            server.load_state_dict(agg_bn_state, strict=False)
+
 
 class FedProx(FedAvg):
     """
