@@ -504,25 +504,26 @@ class FedGH(FedAvg):
 
     def harmonize_gradients(self, grads_list: List[torch.Tensor]) -> List[torch.Tensor]:
         num_clients = len(grads_list)
-        original_grads = [g.clone().detach() for g in grads_list]
         harmonized_list = [g.clone().detach() for g in grads_list]
-        
+      
         for i in range(num_clients):
             for j in range(i + 1, num_clients):
-                g_i = original_grads[i]
-                g_j = original_grads[j]
+                g_i = grads_list[i]
+                g_j = grads_list[j]
+                
                 dot = torch.dot(g_i, g_j)
                 
+              
                 if dot < 0:
                     norm_i_sq = torch.dot(g_i, g_i)
                     norm_j_sq = torch.dot(g_j, g_j)
-
-                    if norm_j_sq > 1e-12: 
-                        proj_i_on_j = (dot / norm_j_sq) * g_j
-                        harmonized_list[i] -= proj_i_on_j 
                     
-                    if norm_i_sq > 1e-12:
-                        proj_j_on_i = (dot / norm_i_sq) * g_i
+                    if norm_j_sq > 1e-6 :
+                        proj_i_on_j = (dot / (norm_j_sq + 1e-6 )) * g_j
+                        harmonized_list[i] -= proj_i_on_j                     
+
+                    if norm_i_sq > 1e-6 :
+                        proj_j_on_i = (dot / (norm_i_sq + 1e-6 )) * g_i
                         harmonized_list[j] -= proj_j_on_i 
 
         return harmonized_list
