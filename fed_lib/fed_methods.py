@@ -548,7 +548,8 @@ class FedGH(FedAvg):
             pseudo_grad = server_flat - client_flat
             pseudo_gradients.append(pseudo_grad)
 
-        harmonized_grads = self.harmonize_gradients(pseudo_gradients)
+        # harmonized_grads = self.harmonize_gradients(pseudo_gradients)
+        harmonized_grads = pseudo_gradients
         total = np.array([self.client_weights[idx] for idx in selected_indices])
         aggregation_weights = total/sum(total)
         
